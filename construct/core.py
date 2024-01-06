@@ -3867,6 +3867,22 @@ class Select(Construct):
                 return obj
         raise SelectError("no subconstruct matched", path=path)
 
+    def _emitparse(self, code):
+        fname = f"parse_select_{code.allocateId()}"
+
+        block = f"""
+            def {fname}(io, this):
+        """
+        for sc in self.subcons:
+            block += f"""
+                try:
+                    return {sc._compileparse(code)}
+                except:
+                    pass
+            """
+        code.append(block)
+        return "%s(io, this)" % (fname,)
+
     def _build(self, obj, stream, context, path):
         for sc in self.subcons:
             try:
@@ -3984,6 +4000,7 @@ class IfThenElse(Construct):
         return sc._sizeof(context, path)
 
     def _emitparse(self, code):
+        raise NotImplementedError
         return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), self.condfunc, self.elsesubcon._compileparse(code), )
 
     def _emitbuild(self, code):
