@@ -2274,16 +2274,21 @@ class Struct(Construct):
 
     def _emitparse(self, code):
         fname = f"parse_struct_{code.allocateId()}"
+        dedicatedClass = f"""
+            class {fname}_Container(Container):
+                __slots__ = ('__recursion_lock__', {", ".join("'"+sc.name+"'" for sc in self.subcons)})
+        """
         block = f"""
+            {dedicatedClass}
             def {fname}(io, this):
-                result = Container()
-                this = Container(_ = this, _params = this['_params'], _root = None, _parsing = True, _building = False, _sizing = False, _subcons = None, _io = io, _index = this.get('_index', None))
+                result = {fname}_Container()
+                this = {fname}_Container(_ = this, _params = this['_params'], _root = None, _parsing = True, _building = False, _sizing = False, _subcons = None, _io = io, _index = this.get('_index', None))
                 this['_root'] = this['_'].get('_root', this)
                 try:
         """
         for sc in self.subcons:
             block += f"""
-                    {f'result[{repr(sc.name)}] = this[{repr(sc.name)}] = ' if sc.name else ''}{sc._compileparse(code)}
+                    {f'result.{(sc.name)} = this.{(sc.name)} = ' if sc.name else ''}{sc._compileparse(code)}
             """
         block += f"""
                     pass
