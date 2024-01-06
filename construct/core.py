@@ -2277,6 +2277,9 @@ class Struct(Construct):
         dedicatedClass = f"""
             class {fname}_Container(Container):
                 __slots__ = ('__recursion_lock__', {", ".join("'"+sc.name+"'" for sc in self.subcons)})
+                def __getitem__(self, key):
+                    return getattr(self, key)
+                    
         """
         block = f"""
             {dedicatedClass}
