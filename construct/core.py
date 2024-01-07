@@ -2274,12 +2274,21 @@ class Struct(Construct):
 
     def _emitparse(self, code):
         fname = f"parse_struct_{code.allocateId()}"
+
+        reprlstring = ", ".join(f"{sc.name}=result.{sc.name}" for sc in self.subcons)
+
+        types_in_scname = set(type(item) for item in self.subcons)
+        if types_in_scname != set([str]):
+            raise NotImplementedError
+        
         dedicatedClass = f"""
             class {fname}_Container(Container):
                 __slots__ = ('__recursion_lock__', {", ".join("'"+sc.name+"'" for sc in self.subcons)})
-                def __getitem__(self, key):
-                    return getattr(self, key)
-                    
+
+                @classmethod
+                def items(cls, self):
+                    for name in (item in __slots__ if item[0] != '_'):
+                        yield (name, sef.__getattr__(name),)
         """
         block = f"""
             {dedicatedClass}
@@ -2297,7 +2306,7 @@ class Struct(Construct):
                     pass
                 except StopFieldError:
                     pass
-                return result
+                return Container({reprlstring})
         """
         code.append(block)
         return f"{fname}(io, this)"
