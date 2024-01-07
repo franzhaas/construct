@@ -3440,6 +3440,7 @@ class NamedTuple(Adapter):
             %s = collections.namedtuple(%r, %r)
         """ % (fname, self.tuplename, self.tuplefields, ))
         if isinstance(self.subcon, Struct):
+            raise NotImplementedError("Struct namedtuples right now not compilable... This would mix dict and member access...")
             return "%s(**(%s))" % (fname, self.subcon._compileparse(code), )
         if isinstance(self.subcon, (Sequence,Array,GreedyRange)):
             return "%s(*(%s))" % (fname, self.subcon._compileparse(code), )
