@@ -267,6 +267,7 @@ class CodeGen:
         self.linkedinstances = {}
         self.linkedparsers = {}
         self.linkedbuilders = {}
+        self.userfunction = {}
 
     def allocateId(self):
         self.nextid += 1
@@ -535,6 +536,7 @@ class Construct(object):
             linkedinstances = {}
             linkedparsers = {}
             linkedbuilders = {}
+            userfunction = {}
 
             len_ = len
             sum_ = sum
@@ -564,6 +566,7 @@ class Construct(object):
         module.linkedinstances = code.linkedinstances
         module.linkedparsers = code.linkedparsers
         module.linkedbuilders = code.linkedbuilders
+        module.userfunction = code.userfunction
         compiled = module.compiled
         compiled.source = source
         compiled.module = module
@@ -2275,19 +2278,25 @@ class Struct(Construct):
     def _emitparse(self, code):
         fname = f"parse_struct_{code.allocateId()}"
 
-        reprlstring = ", ".join(f"{sc.name}=result.{sc.name}" for sc in self.subcons)
+        scnames = [sc.name for sc in self.subcons]
 
+        scnametypes = {item for item in scnames if type(item) != str}
+        if scnametypes:
+            raise NotImplementedError()
+        
+        reprlstring = ", ".join(f"{item}=result.{item}" for item in scnames)
         types_in_scname = set(type(item) for item in self.subcons)
-        if types_in_scname != set([str]):
-            raise NotImplementedError
+        full_slots = "('__recursion_lock__', " + ", ".join('"'+item+'"' for item in scnames) + ")"
+        element_names = "(" + ", ".join('"'+item+'"' for item in scnames) + ")"            
         
         dedicatedClass = f"""
             class {fname}_Container(Container):
-                __slots__ = ('__recursion_lock__', {", ".join("'"+sc.name+"'" for sc in self.subcons)})
+                __slots__ = {full_slots}
+                __element_names = {element_names}
 
                 @classmethod
                 def items(cls, self):
-                    for name in (item in __slots__ if item[0] != '_'):
+                    for name in cls.__element_names:
                         yield (name, sef.__getattr__(name),)
         """
         block = f"""
@@ -3440,7 +3449,6 @@ class NamedTuple(Adapter):
             %s = collections.namedtuple(%r, %r)
         """ % (fname, self.tuplename, self.tuplefields, ))
         if isinstance(self.subcon, Struct):
-            raise NotImplementedError("Struct namedtuples right now not compilable... This would mix dict and member access...")
             return "%s(**(%s))" % (fname, self.subcon._compileparse(code), )
         if isinstance(self.subcon, (Sequence,Array,GreedyRange)):
             return "%s(*(%s))" % (fname, self.subcon._compileparse(code), )
@@ -4013,7 +4021,9 @@ class IfThenElse(Construct):
         return sc._sizeof(context, path)
 
     def _emitparse(self, code):
-        raise NotImplementedError
+        if type(self.condfunc) == type(lambda x: x):
+            code.userfunction[code.allocateId()] = self.condfunc
+            return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), f"userfunction[{code.allocateId()}]()", self.elsesubcon._compileparse(code), )
         return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), self.condfunc, self.elsesubcon._compileparse(code), )
 
     def _emitbuild(self, code):
