@@ -185,7 +185,10 @@ class Path(ExprMixin):
         if self.__parent is None:
             return obj
         else:
-            return self.__parent(obj)[self.__field]
+            try:
+                return getattr(self.__parent(obj),self.__field)
+            except AttributeError:
+                return self.__parent(obj)[self.__field]
 
     def __getfield__(self):
         return self.__field
