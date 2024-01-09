@@ -2287,7 +2287,15 @@ class Struct(Construct):
         reprlstring = ", ".join(f"{item}=result.{item}" for item in scnames)
         types_in_scname = set(type(item) for item in self.subcons)
         full_slots = "('__recursion_lock__', " + ", ".join('"'+item+'"' for item in scnames) + ")"
-        element_names = "(" + ", ".join('"'+item+'"' for item in scnames) + ")"            
+        element_names = "(" + ", ".join('"'+item+'"' for item in scnames) + ")"
+
+        stencils = (f"""
+                    try:
+                        yield ("{item}", self.{item},)
+                    except:
+                        pass
+                    """ for item in scnames)
+        stencil = "".join(stencils)
         
         dedicatedClass = f"""
             class {fname}_Container(Container):
@@ -2296,8 +2304,7 @@ class Struct(Construct):
 
                 @classmethod
                 def items(cls, self):
-                    for name in cls.__element_names:
-                        yield (name, sef.__getattr__(name),)
+                    {stencil}
         """
         block = f"""
             {dedicatedClass}
