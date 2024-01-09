@@ -4028,7 +4028,7 @@ class IfThenElse(Construct):
         return sc._sizeof(context, path)
 
     def _emitparse(self, code):
-        if type(self.condfunc) == type(lambda x: x):
+        if callable(self.condfunc):
             code.userfunction[code.allocateId()] = self.condfunc
             return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), f"userfunction[{code.allocateId()}]()", self.elsesubcon._compileparse(code), )
         return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), self.condfunc, self.elsesubcon._compileparse(code), )
