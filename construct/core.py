@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import struct, io, binascii, itertools, collections, pickle, sys, os, hashlib, importlib, importlib.machinery, importlib.util
+from inspect import isfunction
 
 from construct.lib import *
 from construct.expr import *
@@ -4028,7 +4029,7 @@ class IfThenElse(Construct):
         return sc._sizeof(context, path)
 
     def _emitparse(self, code):
-        if callable(self.condfunc):
+        if isfunction(self.condfunc):
             code.userfunction[code.allocateId()] = self.condfunc
             return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), f"userfunction[{code.allocateId()}]()", self.elsesubcon._compileparse(code), )
         return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), self.condfunc, self.elsesubcon._compileparse(code), )
