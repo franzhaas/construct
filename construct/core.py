@@ -4029,8 +4029,9 @@ class IfThenElse(Construct):
 
     def _emitparse(self, code):
         if isfunction(self.condfunc):
-            code.userfunction[code.allocateId()] = self.condfunc
-            return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), f"userfunction[{code.allocateId()}]()", self.elsesubcon._compileparse(code), )
+            aid = code.allocateId()
+            code.userfunction[aid] = self.condfunc
+            return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), f"userfunction[{aid}](this)", self.elsesubcon._compileparse(code), )
         return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), self.condfunc, self.elsesubcon._compileparse(code), )
 
     def _emitbuild(self, code):
