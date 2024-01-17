@@ -3040,7 +3040,12 @@ class Rebuild(Subconstruct):
         return self.subcon._compileparse(code)
 
     def _emitbuild(self, code):
-        return f"reuse({repr(self.func)}, lambda obj: ({self.subcon._compilebuild(code)}))"
+        if type(self.condfunc) == FuncPath:
+            return f"reuse({repr(self.func)}, lambda obj: ({self.subcon._compilebuild(code)}))"
+        else:
+            aid = code.allocateId()
+            code.userfunction[aid] = self.func
+            return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), f"userfunction[{aid}](this)", self.elsesubcon._compileparse(code), )
 
     def _emitseq(self, ksy, bitwise):
         return self.subcon._compileseq(ksy, bitwise)
