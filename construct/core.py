@@ -3040,7 +3040,7 @@ class Rebuild(Subconstruct):
         return self.subcon._compileparse(code)
 
     def _emitbuild(self, code):
-        if type(self.func) == FuncPath or(not callable(self.func)):
+        if isinstance(self.func, ExprMixin) or(not callable(self.func)):
             return f"reuse({repr(self.func)}, lambda obj: ({self.subcon._compilebuild(code)}))"
         else:
             aid = code.allocateId()
@@ -4033,7 +4033,7 @@ class IfThenElse(Construct):
         return sc._sizeof(context, path)
 
     def _emitparse(self, code):
-        if type(self.condfunc) == FuncPath or (not callable(self.condfunc)):
+        if isinstance(self.condfunc, ExprMixin) or (not callable(self.condfunc)):
             return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), self.condfunc, self.elsesubcon._compileparse(code), )
         else:
             aid = code.allocateId()
