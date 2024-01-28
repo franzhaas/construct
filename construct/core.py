@@ -3915,6 +3915,23 @@ class Select(Construct):
             """
         code.append(block)
         return "%s(io, this)" % (fname,)
+    
+    def _emitbuild(self, code):
+        fname = f"build_select_{code.allocateId()}"
+
+        block = f"""
+            def {fname}(obj, io, this):
+        """
+        for sc in self.subcons:
+            block += f"""
+                try:
+                    return {sc._compilebuild(code)}
+                except:
+                    pass
+            """
+        code.append(block)
+        return "%s(obj, io, this)" % (fname,)
+
 
     def _build(self, obj, stream, context, path):
         for sc in self.subcons:
@@ -4041,7 +4058,12 @@ class IfThenElse(Construct):
             return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), f"userfunction[{aid}](this)", self.elsesubcon._compileparse(code), )
 
     def _emitbuild(self, code):
-        return f"(({self.thensubcon._compilebuild(code)}) if ({repr(self.condfunc)}) else ({self.elsesubcon._compilebuild(code)}))"
+        if isinstance(self.condfunc, ExprMixin) or (not callable(self.condfunc)):
+            return f"(({self.thensubcon._compilebuild(code)}) if ({repr(self.condfunc)}) else ({self.elsesubcon._compilebuild(code)}))"
+        else:
+            aid = code.allocateId()
+            code.userfunction[aid] = self.condfunc
+            return f"(({self.thensubcon._compilebuild(code)}) if (userfunction[{aid}](this)) else ({self.elsesubcon._compilebuild(code)}))" 
 
     def _emitseq(self, ksy, bitwise):
         return [
