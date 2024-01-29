@@ -2279,14 +2279,10 @@ class Struct(Construct):
     def _emitparse(self, code):
         fname = f"parse_struct_{code.allocateId()}"
 
-        scnames = [sc.name for sc in self.subcons]
+        scnames = [sc.name for sc in self.subcons if type(sc.name) == str]
 
-        scnametypes = {item for item in scnames if type(item) != str}
-        if scnametypes:
-            raise NotImplementedError()
         
         reprlstring = ", ".join(f"{item}={item}" for item in scnames)
-        types_in_scname = set(type(item) for item in self.subcons)
         full_slots = "('__recursion_lock__', " + ", ".join('"'+item+'"' for item in scnames) + ")"
         element_names = "(" + ", ".join('"'+item+'"' for item in scnames) + ")"
 
@@ -2340,8 +2336,7 @@ class Struct(Construct):
         for sc in self.subcons:
             block += f"""
                     {f'obj = objdict.get({repr(sc.name)}, None)' if sc.flagbuildnone else f'obj = objdict[{repr(sc.name)}]'}
-                    {f'this[{repr(sc.name)}] = obj' if sc.name else ''}
-                    {f'this[{repr(sc.name)}] = ' if sc.name else ''}{sc._compilebuild(code)}
+                    {sc._compilebuild(code)}
             """
         block += f"""
                     pass
