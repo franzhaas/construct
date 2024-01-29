@@ -4136,8 +4136,12 @@ class Switch(Construct):
         for key,sc in self.cases.items():
             code.append(f"{fname}[{repr(key)}] = lambda io,this: {sc._compileparse(code)}")
         defaultfname = f"switch_defaultcase_{code.allocateId()}"
-        code.append(f"{defaultfname} = lambda io,this: {self.default._compileparse(code)}")
-        return f"{fname}.get({repr(self.keyfunc)}, {defaultfname})(io, this)"
+        if isinstance(self.keyfunc, ExprMixin) or(not callable(self.keyfunc)):
+            return f"{fname}.get({repr(self.keyfunc)}, {defaultfname})(io, this)"
+        else:
+            aid = code.allocateId()
+            code.userfunction[aid] = self.keyfunc
+            return f"{fname}.get(userfunction[{aid}](this), {defaultfname})(io, this)"
 
     def _emitbuild(self, code):
         fname = f"switch_cases_{code.allocateId()}"
@@ -4146,8 +4150,12 @@ class Switch(Construct):
             code.append(f"{fname}[{repr(key)}] = lambda obj,io,this: {sc._compilebuild(code)}")
         defaultfname = f"switch_defaultcase_{code.allocateId()}"
         code.append(f"{defaultfname} = lambda obj,io,this: {self.default._compilebuild(code)}")
-        return f"{fname}.get({repr(self.keyfunc)}, {defaultfname})(obj, io, this)"
-
+        if isinstance(self.keyfunc, ExprMixin) or(not callable(self.keyfunc)):
+            return f"{fname}.get({repr(self.keyfunc)}, {defaultfname})(obj, io, this)"
+        else:
+            aid = code.allocateId()
+            code.userfunction[aid] = self.keyfunc
+            return f"{fname}.get(userfunction[{aid}](this), {defaultfname})(obj, io, this)"
 
 class StopIf(Construct):
     r"""
