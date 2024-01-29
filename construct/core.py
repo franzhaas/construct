@@ -4136,6 +4136,7 @@ class Switch(Construct):
         for key,sc in self.cases.items():
             code.append(f"{fname}[{repr(key)}] = lambda io,this: {sc._compileparse(code)}")
         defaultfname = f"switch_defaultcase_{code.allocateId()}"
+        code.append(f"{defaultfname} = lambda io,this: {self.default._compileparse(code)}")
         if isinstance(self.keyfunc, ExprMixin) or(not callable(self.keyfunc)):
             return f"{fname}.get({repr(self.keyfunc)}, {defaultfname})(io, this)"
         else:
