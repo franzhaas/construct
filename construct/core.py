@@ -2460,8 +2460,8 @@ class Sequence(Construct):
         block = f"""
             def {fname}(io, this):
                 result = ListContainer()
-                this = Container(_ = this, _params = this._params, _root = None, _parsing = True, _building = False, _sizing = False, _subcons = None, _io = io, _index = this.get('_index', None))
-                this._root = this._.get('_root', this)
+                this = Container(_ = this, _params = this['_params'], _root = None, _parsing = True, _building = False, _sizing = False, _subcons = None, _io = io, _index = this.get('_index', None))
+                this['_root'] = this['_'].get('_root', this)
                 try:
         """
         for sc in self.subcons:
@@ -3296,8 +3296,8 @@ class FocusedSeq(Construct):
         block = f"""
             def {fname}(io, this):
                 result = []
-                this = Container(_ = this, _params = this._params, _root = None, _parsing = True, _building = False, _sizing = False, _subcons = None, _io = io, _index = this.get('_index', None))
-                this._root = this._.get('_root', this)
+                this = Container(_ = this, _params = this['_params'], _root = None, _parsing = True, _building = False, _sizing = False, _subcons = None, _io = io, _index = this.get('_index', None))
+                this['_root'] = this['_'].get('_root', this)
         """
         for sc in self.subcons:
             block += f"""
