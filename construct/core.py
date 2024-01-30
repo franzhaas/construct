@@ -561,6 +561,9 @@ class Construct(object):
         modulename = hexlify(hashlib.sha1(source.encode()).digest()).decode()
         module_spec = importlib.machinery.ModuleSpec(modulename, None)
         module = importlib.util.module_from_spec(module_spec)
+        with open("py9.py", "w") as f:
+            f.write(source)
+
         c = compile(source, '', 'exec')
         exec(c, module.__dict__)
 
@@ -2280,6 +2283,9 @@ class Struct(Construct):
         fname = f"parse_struct_{code.allocateId()}"
 
         scnames = [sc.name for sc in self.subcons if type(sc.name) == str]
+
+        if len(scnames) == 0:
+            return "None"
 
         
         reprlstring = ", ".join(f"{item}={item}" for item in scnames)
