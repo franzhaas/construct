@@ -331,13 +331,13 @@ def test_enum_enum36():
     common(d, b"\x02", "b", 1)
 
 def test_enum_issue_298():
-    d = Struct(
-        "ctrl" / Enum(Byte,
+
+    d = Struct("ctrl" / Enum(Byte,
             NAK = 0x15,
             STX = 0x02,
         ),
         Probe(),
-        "optional" / If(lambda this: this.ctrl == "NAK", Byte),
+        "optional" / If(lambda this: this.ctrl == EnumIntegerString.new(21, 'NAK'), Byte),
     )
     common(d, b"\x15\xff", Container(ctrl='NAK', optional=255))
     common(d, b"\x02", Container(ctrl='STX', optional=None))
