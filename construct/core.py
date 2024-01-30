@@ -2304,11 +2304,15 @@ class Struct(Construct):
             class {fname}_Container(Container):
                 __slots__ = {full_slots}
                 __element_names = {element_names}
-
+                """
+        itemssection= """
                 @classmethod
                 def items(cls, self):
                     {stencil}
         """
+        if len(scnames):
+            dedicatedClass = dedicatedClass + itemssection
+
         block = f"""
             {dedicatedClass}
             def {fname}(io, this):
