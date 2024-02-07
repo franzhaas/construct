@@ -878,6 +878,10 @@ def test_if():
 def test_ifthenelse():
     common(IfThenElse(True,  Int8ub, Int16ub), b"\x01", 1, 1)
     common(IfThenElse(False, Int8ub, Int16ub), b"\x00\x01", 1, 2)
+    stimulus_with_user_function = IfThenElse(lambda _: False, Int8ub, Int16ub)
+    for d in [stimulus_with_user_function, stimulus_with_user_function.compile()]:
+        common(d, b"\x00\x01", 1, 2)
+
 
 def test_switch():
     d = Switch(this.x, {1:Int8ub, 2:Int16ub, 4:Int32ub})
@@ -888,8 +892,18 @@ def test_switch():
     assert raises(d.sizeof) == SizeofError
     assert raises(d.sizeof, x=1) == 1
 
+    dStencil = Switch(lambda this: this["x"], {1:Int8ub, 2:Int16ub, 4:Int32ub})
+    for d in [dStencil, dStencil.compile()]:
+        common(d, b"\x01", 0x01, 1, x=1)
+        common(d, b"\x01\x02", 0x0102, 2, x=2)
+        assert d.parse(b"", x=255) == None
+        assert d.build(None, x=255) == b""
+        assert raises(d.sizeof) == SizeofError
+        assert raises(d.sizeof, x=1) == 1
+
     d = Switch(this.x, {}, default=Byte)
     common(d, b"\x01", 1, 1, x=255)
+    
 
 def test_switch_issue_357():
     inner = Struct(
