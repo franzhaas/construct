@@ -1906,6 +1906,8 @@ class EnumIntegerString(str):
     """Used internally."""
 
     def __repr__(self):
+        #Eventually this will just be the int value. This makes enums at runtime of
+        #compiled code just as fast as integers...
         return "EnumIntegerString.new(%s, %s)" % (self.intvalue, str.__repr__(self), )
 
     def __int__(self):
