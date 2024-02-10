@@ -3364,6 +3364,19 @@ class Pickled(Construct):
         pickle.dump(obj, stream)
         return obj
 
+    def _emitparse(self, code):
+        fname = "factory_%s" % code.allocateId()
+        code.append("""
+            import pickle
+                    """)
+        return "pickle.load(io)"
+
+    def _emitbuild(self, code):
+        fname = "factory_%s" % code.allocateId()
+        code.append("""
+            import pickle
+                    """)
+        return "pickle.dump(obj, io)"
 
 @singleton
 class Numpy(Construct):
@@ -3395,6 +3408,20 @@ class Numpy(Construct):
         import numpy
         numpy.save(stream, obj)
         return obj
+
+    def _emitparse(self, code):
+        fname = "factory_%s" % code.allocateId()
+        code.append("""
+            import numpy
+                    """)
+        return "numpy.load(io)"
+
+    def _emitbuild(self, code):
+        fname = "factory_%s" % code.allocateId()
+        code.append("""
+            import numpy
+                    """)
+        return "numpy.save(io, obj)"
 
 
 class NamedTuple(Adapter):
