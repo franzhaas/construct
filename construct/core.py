@@ -1797,6 +1797,7 @@ def PascalString(lengthfield, encoding):
 
     def _emitparse(code):
         return f"io.read({lengthfield._compileparse(code)}).decode({repr(encoding)})"
+        
     macro._emitparse = _emitparse
 
     def _emitseq(ksy, bitwise):
@@ -3928,6 +3929,48 @@ class Select(Construct):
                 stream_write(stream, data, len(data), path)
                 return obj
         raise SelectError("no subconstruct matched: %s" % (obj,), path=path)
+
+    def _emitparse(self, code):
+        fname = f"parse_select_{code.allocateId()}"
+
+        block = f"""
+            def {fname}(io, this):
+                fallback = io.tell()
+        """
+        for sc in self.subcons:
+                cb = sc._compileparse(code)
+                if cb == "None":
+                    block += f"""
+                return None
+                """
+                else:
+                    block += f"""
+                try:
+                    return {cb}
+                except ExplicitError:
+                    raise
+                except Exception:
+                    io.seek(io, fallback, 0)
+                """
+        code.append(block)
+        return "%s(io, this)" % (fname,)
+
+    def _emitbuild(self, code):
+        fname = f"build_select_{code.allocateId()}"
+
+        block = f"""
+            def {fname}(obj, io, this):
+        """
+        for sc in self.subcons:
+            block += f"""
+                try:
+                    return {sc._compilebuild(code)}
+                except:
+                    pass
+            """
+        code.append(block)
+        return "%s(obj, io, this)" % (fname,)
+
 
 
 def Optional(subcon):
