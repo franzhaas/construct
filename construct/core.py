@@ -2307,14 +2307,41 @@ class Struct(Construct):
 
         nonOptionalSubcons = []
         rearOptionalSubcons = []
+        soFarAllOptional = True
 
+        for item in reversed(self.subcons):
+            if soFarAllOptional and hasattr(item, "subcon") and  hasattr(item.subcon, "subcon") and isinstance(item.subcon.subcon, Optional):
+                rearOptionalSubcons.insert(0, item)
+            else:
+                soFarAllOptional = False
+                nonOptionalSubcons.insert(0, item)
 
-        for sc in self.subcons:
+        for sc in nonOptionalSubcons:
             block += f"""
                     {f'result[{repr(sc.name)}] = this[{repr(sc.name)}] = ' if sc.name else ''}{sc._compileparse(code)}
             """
+        if rearOptionalSubcons:
+            for sc in rearOptionalSubcons:
+                block += f"""
+                    result[{repr(sc.name)}] = this[{repr(sc.name)}] = None
+            """
+            block += """
+                    try:
+                """
+            for sc in rearOptionalSubcons:
+                block += f"""
+                          fallback = io.tell()
+                          {f'result[{repr(sc.name)}] = this[{repr(sc.name)}] = ' if sc.name else ''}{sc.subcon.subcon.subcons[0]._compileparse(code)}
+                """
+            block += """
+                    except StopFieldError:
+                        pass
+                    except ExplicitError:
+                        raise
+                    except Exception:
+                        io.seek(fallback)
+"""
         block += f"""
-                    pass
                 except StopFieldError:
                     pass
                 return result
