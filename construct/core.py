@@ -5,6 +5,7 @@ import struct, io, binascii, itertools, collections, pickle, sys, os, hashlib, i
 from construct.lib import *
 from construct.expr import *
 from construct.version import *
+import re
 import logging
 
 
@@ -2296,14 +2297,21 @@ class Struct(Construct):
             raise SizeofError("cannot calculate size, key not found in context", path=path)
 
     def _emitparse(self, code):
+        def remove_unused_this_assignments(input_string):
+            pattern = r'this\[(.*?)\]'
+            if isinstance(input_string, str) and len(re.findall(r'this[^[]', "\n".join(input_string.split("\n")[6:]))) == 0:
+                occurrences = {}
+                matches = re.findall(pattern, input_string)
+                for match in matches:
+                    occurrences[match] = occurrences.get(match, 0) + 1
+                toRemove = {key for key, value in occurrences.items() if key not in {"'_params'", "'_root'", "'_'"} and value == 1}
+                patterns = {rf'this\[{item}\] =' for item in toRemove}
+                for pattern in patterns:
+                    input_string = re.sub(pattern, '', input_string)
+            return input_string
+
+
         fname = f"parse_struct_{code.allocateId()}"
-        block = f"""
-            def {fname}(io, this):
-                result = Container()
-                this = Container(_ = this, _params = this['_params'], _root = None, _parsing = True, _building = False, _sizing = False, _subcons = None, _io = io, _index = this.get('_index', None))
-                this['_root'] = this['_'].get('_root', this)
-                try:
-        """
 
         nonOptionalSubcons = []
         rearOptionalSubcons = []
@@ -2315,16 +2323,22 @@ class Struct(Construct):
             else:
                 soFarAllOptional = False
                 nonOptionalSubcons.insert(0, item)
-
+        initialisation = ""
+        if rearOptionalSubcons:
+            initialisation="**{"+",".join(f"{repr(sc.name)}:None"for sc in rearOptionalSubcons)+"}"
+            
+        block = f"""
+            def {fname}(io, this):
+                result = Container({initialisation})
+                this = Container(_ = this, _params = this['_params'], _root = None, _parsing = True, _building = False, _sizing = False, _subcons = None, _io = io, _index = this.get('_index', None))
+                this['_root'] = this['_'].get('_root', this)
+                try:
+        """
         for sc in nonOptionalSubcons:
             block += f"""
                     {f'result[{repr(sc.name)}] = this[{repr(sc.name)}] = ' if sc.name else ''}{sc._compileparse(code)}
             """
         if rearOptionalSubcons:
-            for sc in rearOptionalSubcons:
-                block += f"""
-                    result[{repr(sc.name)}] = this[{repr(sc.name)}] = None
-            """
             block += """
                     try:
                 """
@@ -2342,11 +2356,12 @@ class Struct(Construct):
                         io.seek(fallback)
 """
         block += f"""
+                    pass
                 except StopFieldError:
                     pass
                 return result
         """
-        code.append(block)
+        code.append(remove_unused_this_assignments(block))
         return f"{fname}(io, this)"
 
     def _emitbuild(self, code):
