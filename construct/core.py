@@ -2304,6 +2304,11 @@ class Struct(Construct):
                 this['_root'] = this['_'].get('_root', this)
                 try:
         """
+
+        nonOptionalSubcons = []
+        rearOptionalSubcons = []
+
+
         for sc in self.subcons:
             block += f"""
                     {f'result[{repr(sc.name)}] = this[{repr(sc.name)}] = ' if sc.name else ''}{sc._compileparse(code)}
@@ -3973,7 +3978,7 @@ class Select(Construct):
 
 
 
-def Optional(subcon):
+class Optional(Select):
     r"""
     Makes an optional field.
 
@@ -3995,7 +4000,10 @@ def Optional(subcon):
         >>> d.build(None)
         b''
     """
-    return Select(subcon, Pass)
+    def __init__(self, subcon):
+        super().__init__()
+        self.subcons = [subcon, Pass]
+        self.flagbuildnone = any(sc.flagbuildnone for sc in self.subcons)
 
 
 def If(condfunc, subcon):
