@@ -2330,7 +2330,7 @@ class Struct(Construct):
                     f = sc.fmtstr
                     _len = _len + l
                     if _fmtstrings and f[0] in {">", "<"}:
-                        if f[0] != _fmtstrings[0]:
+                        if f[0] != _fmtstrings[0] and not (f[1] in {"B", "b"} and len(f) == 2):
                             raise Exception()
                         f = f[1:]
                     _fmtstrings = _fmtstrings+f
