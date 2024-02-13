@@ -2303,6 +2303,7 @@ class Struct(Construct):
                 this = Container(_ = this, _params = this['_params'], _root = None, _parsing = True, _building = False, _sizing = False, _subcons = None, _io = io, _index = this.get('_index', None))
                 this['_root'] = this['_'].get('_root', this)
                 try:
+                    pass
         """
 
         nonOptionalSubcons = []
@@ -2316,10 +2317,40 @@ class Struct(Construct):
                 soFarAllOptional = False
                 nonOptionalSubcons.insert(0, item)
 
-        for sc in nonOptionalSubcons:
-            block += f"""
+        while nonOptionalSubcons:
+            _names = []
+            _len = 0
+            _fmtstrings = ""
+            
+            while True:
+                try:
+                    sc = nonOptionalSubcons.pop(0)
+                    n = sc.name
+                    l = sc.length
+                    f = sc.fmtstr
+                    _len = _len + l
+                    if _fmtstrings and f[0] in {">", "<"}:
+                        if f[0] != _fmtstrings[0]:
+                            raise Exception()
+                        f = f[1:]
+                    _fmtstrings = _fmtstrings+f
+                    _names.append(n)
+                    sc = None
+                except:                    
+                    if _names:
+                        _intermediate = f"_intermediate = struct.Struct({repr(_fmtstrings)}).unpack(io.read({_len}))"
+                        _results = "[" + ", ".join(f"result[{repr(item)}]" for item in _names) + f"] = _intermediate"
+                        _this = "[" + ", ".join(f"this[{repr(item)}]" for item in _names) + f"] = _intermediate" 
+                        block += f"""
+                    {_intermediate}
+                    {_results}
+                    {_this}
+                    """
+                    break      
+            if sc:
+                block += f"""
                     {f'result[{repr(sc.name)}] = this[{repr(sc.name)}] = ' if sc.name else ''}{sc._compileparse(code)}
-            """
+                    """
         if rearOptionalSubcons:
             for sc in rearOptionalSubcons:
                 block += f"""
@@ -2327,11 +2358,12 @@ class Struct(Construct):
             """
             block += """
                     try:
+                        pass
                 """
             for sc in rearOptionalSubcons:
                 block += f"""
-                          fallback = io.tell()
-                          {f'result[{repr(sc.name)}] = this[{repr(sc.name)}] = ' if sc.name else ''}{sc.subcon.subcon.subcons[0]._compileparse(code)}
+                        fallback = io.tell()
+                        {f'result[{repr(sc.name)}] = this[{repr(sc.name)}] = ' if sc.name else ''}{sc.subcon.subcon.subcons[0]._compileparse(code)}
                 """
             block += """
                     except StopFieldError:
