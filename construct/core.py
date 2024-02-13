@@ -2338,7 +2338,9 @@ class Struct(Construct):
                     sc = None
                 except:                    
                     if _names:
-                        _intermediate = f"_intermediate = struct.Struct({repr(_fmtstrings)}).unpack(io.read({_len}))"
+                        structname = f"formatfield_{code.allocateId()}"
+                        code.append(f"{structname} = struct.Struct({repr(_fmtstrings)})\n")
+                        _intermediate = f"_intermediate = {structname}.unpack(io.read({_len}))"
                         _results = "[" + ", ".join(f"result[{repr(item)}]" for item in _names) + f"] = _intermediate"
                         _this = "[" + ", ".join(f"this[{repr(item)}]" for item in _names) + f"] = _intermediate" 
                         block += f"""
