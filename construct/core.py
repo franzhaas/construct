@@ -597,7 +597,7 @@ class Construct(object):
             return emitted
         except NotImplementedError:
             self._compileinstance(code)
-            return f"linkedparsers[{id(self)}](io, this, '(???)')"
+            return f"linkedparsers[{id(self)}](io, Container(**this), '(???)')"
 
     def _compilebuild(self, code):
         """Used internally."""
@@ -2300,7 +2300,7 @@ class Struct(Construct):
         block = f"""
             def {fname}(io, this):
                 result = dict()
-                this = Container(_ = this, _params = this['_params'], _root = None, _parsing = True, _building = False, _sizing = False, _subcons = None, _io = io, _index = this.get('_index', None))
+                this = dict(_ = this, _params = this['_params'], _root = None, _parsing = True, _building = False, _sizing = False, _subcons = None, _io = io, _index = this.get('_index', None))
                 this['_root'] = this['_'].get('_root', this)
                 try:
                     pass
