@@ -1778,7 +1778,13 @@ def PaddedString(length, encoding):
     def _emitparse(code):
         return f"io.read({length}).decode('{encoding}').replace('\\x00', '')"
     
+    def _emitbuild(code):
+        return f"(io.write(b'\\00'*{length} if obj == '' else obj.ljust({length}, '\\00').encode('{encoding}')[:{length}]))"
+
     macro._emitparse = _emitparse
+    macro._emitbuild = _emitbuild
+    macro._encoding = encoding
+    macro._length = length
     return macro
 
 
@@ -1803,8 +1809,25 @@ def PascalString(lengthfield, encoding):
 
     def _emitparse(code):
         return f"io.read({lengthfield._compileparse(code)}).decode({repr(encoding)})"
-        
+
+    def _emitbuild(code):
+        fname = f"build_struct_{code.allocateId()}"
+        block = f"""
+            def {fname}(obj, io, this):
+                if obj=="":
+                    obj = 0
+                    {lengthfield._compilebuild(code)}
+                else:
+                    encodedObj = obj.encode('{encoding}')
+                    obj = len(encodedObj)
+                    {lengthfield._compilebuild(code)}
+                    io.write(encodedObj)
+        """
+        code.append(block)
+        return f"{fname}(obj, io, this)"
+
     macro._emitparse = _emitparse
+    macro._emitbuild = _emitbuild
 
     def _emitseq(ksy, bitwise):
         return [
@@ -1812,9 +1835,7 @@ def PascalString(lengthfield, encoding):
             dict(id="data", size="lengthfield", type="str", encoding=encoding),
         ]
     macro._emitseq = _emitseq
-
     return macro
-
 
 def CString(encoding):
     r"""
@@ -1839,6 +1860,27 @@ def CString(encoding):
     def _emitfulltype(ksy, bitwise):
         return dict(type="strz", encoding=encoding)
     macro._emitfulltype = _emitfulltype
+
+    def _emitparse(code):
+        if "def _read2zero(io, term):" not in code.toString():
+            code.append(f"""
+            def _read2zero(io, term):
+                def _worker(termlen):
+                    while True:
+                        item = io.read(termlen)
+                        if item != term:
+                            yield item
+                        else:
+                            break
+                return b"".join(_worker(len(term)))
+        """)
+        return f"_read2zero(io, {encodingunit(encoding)}).decode({repr(encoding)})"
+    
+    def _emitbuild(code):
+        return f"""io.write(obj.encode("{encoding}")+{encodingunit(encoding)}) if obj!="" else io.write({encodingunit(encoding)})"""
+
+    macro._emitparse = _emitparse
+    macro._emitbuild = _emitbuild
     return macro
 
 
@@ -2303,75 +2345,131 @@ class Struct(Construct):
 
     def _emitparse(self, code):
         fname = f"parse_struct_{code.allocateId()}"
-        block = f"""
+        fullheader = f"""
             def {fname}(io, this):
-                result = dict()
                 this = dict(_ = this, _params = this['_params'], _root = None, _parsing = True, _building = False, _sizing = False, _subcons = None, _io = io, _index = this.get('_index', None))
                 this['_root'] = this['_'].get('_root', this)
                 try:
+"""
+        leanheader = f"""
+            def {fname}(io, this):
+                _this = this
+                this = dict()
+                this['_'] = _this
+                try:
+"""
+        block = f"""
         """
 
         subcons = self.subcons.copy()
-
+        initializer = []
+        for sc in subcons:
+            if hasattr(sc, "subcon") and  hasattr(sc.subcon, "subcon") and isinstance(sc.subcon.subcon, Optional):
+                 initializer.append(f"'''{sc.name}''':None")
+        initializer = ", ".join(initializer)
+        block += f"""
+                    result = {{{initializer}}}
+                    """
+        _all_names = []
+        _names = []
         while subcons:
+            _all_names = _all_names + _names
             _names = []
             _len = 0
             _fmtstrings = ""
+            _converters = []
             
             while True:
                 try:
                     sc = subcons.pop(0)
                     if hasattr(sc, "subcon") and  hasattr(sc.subcon, "subcon") and isinstance(sc.subcon.subcon, Optional):
                         raise Exception("optional element")
-
-                    fieldName = sc.name
-                    fieldLen = sc.length
-                    fieldFormatStr = sc.fmtstr
-                    if _fmtstrings and _fmtstrings[0] in {">", "<"}:
-                        if _fmtstrings[0] != _fmtstrings[0] and not (_fmtstrings[1] in {"B", "b"} and len(f) == 2):
+                    if hasattr(sc, "_encoding") and  hasattr(sc, "_length"): #its a padded string
+                        fieldName = sc.name
+                        _names.append(fieldName)
+                        _converters.append(f"decode('{sc._encoding}').replace('\\x00', '')")
+                        _fmtstrings = f"{_fmtstrings}{sc._length}s"
+                        _len = _len + sc._length
+                    else:
+                        fieldName = sc.name
+                        fieldLen = sc.length
+                        fieldFormatStr = sc.fmtstr
+                        noByteOrderForSingleByteItems = {"<B":"B", ">B":"B", 
+                                                         "<b":"b", ">b":"b",
+                                                         "<x":"x", ">x":"x",
+                                                         "<c":"c", ">c":"c",}
+                        if fieldFormatStr in noByteOrderForSingleByteItems: 
+                            fieldFormatStr = noByteOrderForSingleByteItems[fieldFormatStr]
+                        
+                        if _fmtstrings == "":
+                            _fmtstrings = fieldFormatStr
+                        elif _fmtstrings[0] in {">", "<"} and len (fieldFormatStr) >= 2 and _fmtstrings[0] == fieldFormatStr[0]:
+                            # byte order already set, and matching
+                            _fmtstrings = f"{_fmtstrings}{fieldFormatStr[1]}"
+                        elif _fmtstrings[0] not in {">", "<"} and fieldFormatStr[0] in  {">", "<"} and len (fieldFormatStr) >= 2 :
+                            # byte order not already set
+                            _fmtstrings = f"{fieldFormatStr[0]}{_fmtstrings}{fieldFormatStr[1:]}"
+                        elif fieldFormatStr[0] not in {">", "<"} and len (fieldFormatStr) > 0:
+                            # no byte order set on added struct
+                            _fmtstrings = f"{_fmtstrings}{fieldFormatStr}"
+                        else:
                             raise Exception()
-                        fieldFormatStr = fieldFormatStr[1:]
-                    _len = _len + fieldLen
-                    _fmtstrings = _fmtstrings+fieldFormatStr
-                    _names.append(fieldName)
+                        _len += fieldLen
+                        _names.append(fieldName)
+                        _converters.append(None)
                     sc = None
                 except:                    
                     if _names:
                         structname = f"formatfield_{code.allocateId()}"
                         code.append(f"{structname} = struct.Struct({repr(_fmtstrings)})\n")
-                        _intermediate = f"_intermediate = {structname}.unpack(io.read({_len}))"
-                        _results = "[" + ", ".join(f"result[{repr(item)}]" for item in _names) + f"] = _intermediate"
-                        _this = "[" + ", ".join(f"this[{repr(item)}]" for item in _names) + f"] = _intermediate" 
+                        _intermediate_tuple = "(" + ", ".join([f"this['{item}']" for item in _names]) + ",)"
+                        _intermediate = f"{_intermediate_tuple} = ({structname}.unpack(io.read({_len})))"
+                        _results = "; ".join(f"result[{repr(item)}] = this[{repr(item)}] " for item in _names)
+                        _intermediateConversion = "".join(f"this['{_names[idx]}']=this['{_names[idx]}'].{conversion};"
+                                                          for idx, conversion in enumerate(_converters) if conversion)
                         block += f"""
                     {_intermediate}
-                    {_results}
-                    {_this}
-                    """
-                    break      
+                    {_intermediateConversion}
+                    {_results}"""
+                    break
             if sc:
+                _all_names.append(sc.name)
                 if hasattr(sc, "subcon") and  hasattr(sc.subcon, "subcon") and isinstance(sc.subcon.subcon, Optional):
                     block += f"""
                     try:
                         fallback = io.tell()
                         {f'result[{repr(sc.name)}] = this[{repr(sc.name)}] = ' if sc.name else ''}{sc.subcon.subcon.subcons[0]._compileparse(code)}
-                    except StopFieldError:
-                        pass
                     except ExplicitError:
                         raise
                     except Exception:
-                        {f'result[{repr(sc.name)}] = this[{repr(sc.name)}] = '}None 
+                        if io.seek(0, io.SEEK_END) == fallback:
+                            return Container(result) #we are at the end of the stream....
                         io.seek(fallback)
+                        this[{repr(sc.name)}] = None
                     """
                 else:
                     block += f"""
                     {f'result[{repr(sc.name)}] = this[{repr(sc.name)}] = ' if sc.name else ''}{sc._compileparse(code)}
                     """
-
         block += f"""
                 except StopFieldError:
                     pass
                 return Container(result)
         """
+        if block.count("this")==block.count("this["):
+            block = leanheader + block
+            _all_names.append("_")
+            for idx, item in enumerate(_all_names):
+                varName = f"__THIS_{idx:05}"
+                block = block.replace(f"this['{item}']", varName)
+                block = block.replace(f'this["{item}"]', varName)
+                if block.count(varName) == block.count(varName + " =") and block.count(varName + " =") == 2 and block.count(varName + " = None") == 1:
+                    block = block.replace(varName + " = None", "")
+                    block = block.replace(varName + " = ", "")
+                if block.count(varName) == 1:
+                    block = block.replace(varName + " = ", "")
+        else:
+             block = fullheader + block
         code.append(block)
         return f"{fname}(io, this)"
 
@@ -2935,12 +3033,13 @@ class Const(Subconstruct):
         return self.subcon._sizeof(context, path)
 
     def _emitparse(self, code):
+        fun_name = f"parse_const_{code.allocateId()}"
         code.append(f"""
-            def parse_const(value, expected):
-                if not value == expected: raise ConstError
-                return value
+            def {fun_name}(value):
+                if not value == {repr(self.value)}: raise ConstError
+                return {repr(self.value)}
         """)
-        return f"parse_const({self.subcon._compileparse(code)}, {repr(self.value)})"
+        return f"{fun_name}({self.subcon._compileparse(code)})"
 
     def _emitbuild(self, code):
         if isinstance(self.value, bytes):
