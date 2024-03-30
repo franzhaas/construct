@@ -561,6 +561,8 @@ class Construct(object):
         modulename = hexlify(hashlib.sha1(source.encode()).digest()).decode()
         module_spec = importlib.machinery.ModuleSpec(modulename, None)
         module = importlib.util.module_from_spec(module_spec)
+        with open("p.py", "a") as f:
+            f.write(source)
         c = compile(source, '', 'exec')
         exec(c, module.__dict__)
 
@@ -1176,9 +1178,13 @@ class FormatField(Construct):
         return self.length
 
     def _emitparse(self, code):
-        fname = f"formatfield_{code.allocateId()}"
-        code.append(f"{fname} = struct.Struct({repr(self.fmtstr)})")
-        return f"{fname}.unpack(io.read({self.length}))[0]"
+        if self.fmtstr not in {"B", "b", "<B", ">B"}:
+            fname = f"formatfield_{code.allocateId()}"
+            code.append(f"{fname}_unpack = struct.Struct({repr(self.fmtstr)}).unpack")
+            return f"{fname}_unpack(io.read({self.length}))[0]"
+        else:
+            return f"(io.read({self.length}))[0]"
+            
 
     def _emitbuild(self, code):
         fname = f"formatfield_{code.allocateId()}"
@@ -1809,7 +1815,6 @@ def PascalString(lengthfield, encoding):
 
     def _emitparse(code):
         return f"io.read({lengthfield._compileparse(code)}).decode({repr(encoding)})"
-
     def _emitbuild(code):
         fname = f"build_struct_{code.allocateId()}"
         block = f"""
@@ -2345,35 +2350,26 @@ class Struct(Construct):
 
     def _emitparse(self, code):
         fname = f"parse_struct_{code.allocateId()}"
-        fullheader = f"""
-            def {fname}(io, this):
-                this = dict(_ = this, _params = this['_params'], _root = None, _parsing = True, _building = False, _sizing = False, _subcons = None, _io = io, _index = this.get('_index', None))
-                this['_root'] = this['_'].get('_root', this)
-                try:
-"""
         leanheader = f"""
             def {fname}(io, this):
-                _this = this
-                this = dict()
-                this['_'] = _this
+                #this = {{"_" : this}}
+                this = dict(_ = this, _params = this['_params'], _root = None, _parsing = True, _building = False, _sizing = False, _subcons = None, _io = io, _index = this.get('_index', None))
+                this['_root'] = this['_'].get('_root', this)
                 try:
 """
         block = f"""
         """
 
         subcons = self.subcons.copy()
-        initializer = []
-        for sc in subcons:
+        localVars2NameDict = {}
+        for idx, sc in enumerate(subcons):
+            localVars2NameDict[f"__item_{idx}"] = sc.name
             if hasattr(sc, "subcon") and  hasattr(sc.subcon, "subcon") and isinstance(sc.subcon.subcon, Optional):
-                 initializer.append(f"'''{sc.name}''':None")
-        initializer = ", ".join(initializer)
-        block += f"""
-                    result = {{{initializer}}}
-                    """
-        _all_names = []
-        _names = []
+                block += f"""
+                    __item_{idx}=None
+                """
+        Name2LocalVar = {name: localva for localva, name in localVars2NameDict.items()}
         while subcons:
-            _all_names = _all_names + _names
             _names = []
             _len = 0
             _fmtstrings = ""
@@ -2422,54 +2418,41 @@ class Struct(Construct):
                     if _names:
                         structname = f"formatfield_{code.allocateId()}"
                         code.append(f"{structname} = struct.Struct({repr(_fmtstrings)})\n")
-                        _intermediate_tuple = "(" + ", ".join([f"this['{item}']" for item in _names]) + ",)"
+                        _intermediate_tuple = "(" + ", ".join([f"{Name2LocalVar[item]}" for item in _names]) + ",)"
                         _intermediate = f"{_intermediate_tuple} = ({structname}.unpack(io.read({_len})))"
-                        _results = "; ".join(f"result[{repr(item)}] = this[{repr(item)}] " for item in _names)
-                        _intermediateConversion = "".join(f"this['{_names[idx]}']=this['{_names[idx]}'].{conversion};"
-                                                          for idx, conversion in enumerate(_converters) if conversion)
                         block += f"""
                     {_intermediate}
-                    {_intermediateConversion}
-                    {_results}"""
+                    """
                     break
             if sc:
-                _all_names.append(sc.name)
                 if hasattr(sc, "subcon") and  hasattr(sc.subcon, "subcon") and isinstance(sc.subcon.subcon, Optional):
+                    redDictFiller = "{"+ ", ".join(f"'{name}':{localVar}" for localVar, name  in localVars2NameDict.items() if localVar in block)+ "}"
                     block += f"""
                     try:
                         fallback = io.tell()
-                        {f'result[{repr(sc.name)}] = this[{repr(sc.name)}] = ' if sc.name else ''}{sc.subcon.subcon.subcons[0]._compileparse(code)}
+                        {f'{Name2LocalVar[sc.name]} = ' if sc.name else ''}{sc.subcon.subcon.subcons[0]._compileparse(code)}
                     except ExplicitError:
                         raise
                     except Exception:
                         if io.seek(0, io.SEEK_END) == fallback:
-                            return Container(result) #we are at the end of the stream....
+                            return Container({redDictFiller}) #we are at the end of the stream....
                         io.seek(fallback)
-                        this[{repr(sc.name)}] = None
                     """
                 else:
                     block += f"""
-                    {f'result[{repr(sc.name)}] = this[{repr(sc.name)}] = ' if sc.name else ''}{sc._compileparse(code)}
+                    {f'{Name2LocalVar[sc.name]} = ' if sc.name else ''}{sc._compileparse(code)}
                     """
+        redDictFiller = "{"+ ", ".join(f"'{name}':{localVar}" for localVar, name  in localVars2NameDict.items() if localVar in block)+ "}"
+
         block += f"""
                 except StopFieldError:
+                    return Container({redDictFiller_sfe})
                     pass
-                return Container(result)
+                return Container({redDictFiller})
         """
-        if block.count("this")==block.count("this["):
-            block = leanheader + block
-            _all_names.append("_")
-            for idx, item in enumerate(_all_names):
-                varName = f"__THIS_{idx:05}"
-                block = block.replace(f"this['{item}']", varName)
-                block = block.replace(f'this["{item}"]', varName)
-                if block.count(varName) == block.count(varName + " =") and block.count(varName + " =") == 2 and block.count(varName + " = None") == 1:
-                    block = block.replace(varName + " = None", "")
-                    block = block.replace(varName + " = ", "")
-                if block.count(varName) == 1:
-                    block = block.replace(varName + " = ", "")
-        else:
-             block = fullheader + block
+        block = leanheader + block
+        for name, value in Name2LocalVar.items():
+            block = block.replace(f"this['{name}']", value)
         code.append(block)
         return f"{fname}(io, this)"
 
@@ -2616,7 +2599,7 @@ class Sequence(Construct):
                 try:
         """
         for sc in self.subcons:
-            block += f"""
+            block += f"""this[
                     result.append({sc._compileparse(code)})
             """
             if sc.name:
