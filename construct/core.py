@@ -560,7 +560,7 @@ class Construct(object):
                 return {self._compilebuild(code)}
             compiled = Compiled(parseall, buildall)
         """)
-        source = code.toString().replace("this|__current_result__", "this")
+        source = code.toString().replace("dict(this)", "this")
         source = code.toString().replace("__current_result__", "{}")
 
         if filename:
@@ -608,7 +608,7 @@ class Construct(object):
             return emitted
         except NotImplementedError:
             self._compileinstance(code)
-            return f"linkedparsers[{id(self)}](io, Container(**(this|__current_result__)), '(???)')"
+            return f"linkedparsers[{id(self)}](io, Container(**({{**this,**__current_result__}})), '(???)')"
 
     def _compilebuild(self, code):
         """Used internally."""
@@ -2487,7 +2487,7 @@ class Struct(Construct):
             code.append(block)
             return f"{fname}(io)"
         code.append(block)
-        return f"{fname}(io, this|__current_result__)"
+        return f"{fname}(io, {{**this,**__current_result__}})"
 
 
     def _emitbuild(self, code):
@@ -2654,7 +2654,7 @@ class Sequence(Construct):
                 return result
         """
         code.append(block)
-        return f"{fname}(io, this|__current_result__)"
+        return f"{fname}(io, {{**this,**__current_result__}})"
 
     def _emitbuild(self, code):
         fname = f"build_sequence_{code.allocateId()}"
@@ -2916,7 +2916,7 @@ class RepeatUntil(Subconstruct):
                         return list_
         """
         code.append(block)
-        return f"{fname}(io, (this|__current_result__))"
+        return f"{fname}(io, ({{**this,**__current_result__}}))"
 
     def _emitbuild(self, code):
         fname = f"build_repeatuntil_{code.allocateId()}"
@@ -3487,7 +3487,7 @@ class FocusedSeq(Construct):
                 return this[{repr(self.parsebuildfrom)}]
         """
         code.append(block)
-        return f"{fname}(io, (this|__current_result__))"
+        return f"{fname}(io, {{**this,**__current_result__}})"
 
     def _emitbuild(self, code):
         fname = f"build_focusedseq_{code.allocateId()}"
@@ -4030,7 +4030,7 @@ class Union(Construct):
                 return this
         """
         code.append(block)
-        return "%s(io, (this|__current_result__))" % (fname,)
+        return f"{fname}(io, this)"
 
     def _emitbuild(self, code):
         fname = f"build_union_{code.allocateId()}"
@@ -4135,7 +4135,7 @@ class Select(Construct):
                     io.seek(io, fallback, 0)
                 """
         code.append(block)
-        return "%s(io, (this|__current_result__))" % (fname,)
+        return "%s(io, this)" % (fname,)
 
     def _emitbuild(self, code):
         fname = f"build_select_{code.allocateId()}"
@@ -4266,7 +4266,7 @@ class IfThenElse(Construct):
         else:
             aid = code.allocateId()
             code.userfunction[aid] = self.condfunc
-            return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), f"userfunction[{aid}](Container(this|__current_result__))", self.elsesubcon._compileparse(code), )
+            return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), f"userfunction[{aid}](Container({{**this,**__current_result__}}))", self.elsesubcon._compileparse(code), )
 
     def _emitbuild(self, code):
         if isinstance(self.condfunc, ExprMixin) or (not callable(self.condfunc)):
