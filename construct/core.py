@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 
 import struct, io, binascii, itertools, collections, pickle, sys, os, hashlib, importlib, importlib.machinery, importlib.util
-
+from io import SEEK_END as io_SEEK_END
+from io import SEEK_SET as io_SEEK_SET
 from construct.lib import *
 from construct.expr import *
 from construct.version import *
@@ -253,8 +254,8 @@ class BytesIOWithOffsets(io.BytesIO):
     def tell(self) -> int:
         return super().tell() + self.parent_stream_offset
 
-    def seek(self, offset: int, whence: int = io.SEEK_SET) -> int:
-        if whence != io.SEEK_SET:
+    def seek(self, offset: int, whence: int = io_SEEK_SET) -> int:
+        if whence != io_SEEK_SET:
             super().seek(offset, whence)
         else:
             super().seek(offset - self.parent_stream_offset)
@@ -527,6 +528,8 @@ class Construct(object):
             from construct import *
             from construct.lib import *
             from io import BytesIO
+            from io import SEEK_END as io_SEEK_END
+            from io import SEEK_SET as io_SEEK_SET
             import struct
             import collections
             import itertools
@@ -2456,7 +2459,7 @@ class Struct(Construct):
                 except ExplicitError:
                     raise
                 except Exception:
-                    if io.seek(0, io.SEEK_END) == fallback:
+                    if io.seek(0, io_SEEK_END) == fallback:
                         return Container(__current_result__) #we are at the end of the stream....
                     io.seek(fallback)
                     """
@@ -2476,7 +2479,8 @@ class Struct(Construct):
         for name, value in Name2LocalVar.items():
             block = block.replace(f"this['{name}']", value)
 
-        if block.count("this")==8:
+        if block.count("this") == 8:
+            #this is not actively used... remove it to save on dict operations
             block = block.replace(this_init1, "")
             block = block.replace(this_init2, "")
             block = block.replace(", this", "")
