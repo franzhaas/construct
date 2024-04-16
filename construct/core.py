@@ -2413,6 +2413,15 @@ class Struct(Construct):
         self._subcons = Container((sc.name,sc) for sc in self.subcons if sc.name)
         self.flagbuildnone = all(sc.flagbuildnone for sc in self.subcons)
 
+        subcons = []
+        for sc in self.subcons:
+            if __is_type__(sc, Computed) and "this" not in repr(sc.func):
+                subcons = [sc] + subcons
+            else:
+                subcons.append(sc)
+
+        self.subcons = subcons
+
     def __getattr__(self, name):
         if name in self._subcons:
             return self._subcons[name]
@@ -2472,6 +2481,7 @@ class Struct(Construct):
         localVars2NameDict = {key: sc.name for key, sc in localVars2NameDict.items()}
         Name2LocalVar = {name: localVar for localVar, name in localVars2NameDict.items()}
         currentStretchOfFixedLen = _stretchOfFixedLen(length=0, fmtstring="", convertercmd="", names=[])
+
         for sc in self.subcons:
             if __is_type__(sc, StringEncoded) and hasattr(sc, "_encoding") and  hasattr(sc, "_length"): #its a padded string StringEncoded
                 currentStretchOfFixedLen.convertercmd += f"{Name2LocalVar[sc.name]} = {Name2LocalVar[sc.name]}.decode('{sc._encoding}').replace('\\x00', '');"
