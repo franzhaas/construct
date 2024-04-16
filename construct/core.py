@@ -2413,14 +2413,15 @@ class Struct(Construct):
         self._subcons = Container((sc.name,sc) for sc in self.subcons if sc.name)
         self.flagbuildnone = all(sc.flagbuildnone for sc in self.subcons)
 
-        subcons = []
-        for sc in self.subcons:
-            if __is_type__(sc, Computed) and "this" not in repr(sc.func):
-                subcons = [sc] + subcons
+        computedWithInput = [item for item in self.subcons if __is_type__(item, Computed)]
+        self.subcons      = [item for item in self.subcons if not __is_type__(item, Computed)]
+        for cIn in computedWithInput:
+            for idx in range(len(self.subcons)-1, -1, -1):
+                if f"this['{self.subcons[idx].name}']" in repr(cIn.func):
+                    self.subcons.insert(idx+1, cIn)
+                    break
             else:
-                subcons.append(sc)
-
-        self.subcons = subcons
+                self.subcons.insert(0, cIn)
 
     def __getattr__(self, name):
         if name in self._subcons:
