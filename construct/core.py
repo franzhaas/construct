@@ -2317,7 +2317,7 @@ def __get_type__(sc, type, maxDepth=-1):
             return None
 
 
-def reduceDependancyDepth(block, code):
+def __reduceDependancyDepth__(block, code):
     argnames = passnames = ""
     found = (item[1] for item in re.compile(r"(this(\['.*?'\])*)").findall(block))
     for item in found:
@@ -2329,7 +2329,7 @@ def reduceDependancyDepth(block, code):
     return block, (argnames, passnames)
 
 
-def materializeCollectedFixedSizeElements(currentStretchOfFixedLen, block, code, Name2LocalVar):
+def __materializeCollectedFixedSizeElements__(currentStretchOfFixedLen, block, code, Name2LocalVar):
     if currentStretchOfFixedLen.names: #There is at least one item to be parsed using a struct
         structname = f"formatfield_{code.allocateId()}"
         code.append(f"{structname} = struct.Struct({repr(currentStretchOfFixedLen.fmtstring)}) # {currentStretchOfFixedLen.length}\n")
@@ -2339,6 +2339,17 @@ def materializeCollectedFixedSizeElements(currentStretchOfFixedLen, block, code,
                 {currentStretchOfFixedLen.convertercmd}
     """
     return block
+
+
+def __orderComputedParts(computed_in, placeComputed):
+    for cIn in computed_in:
+        for idx in range(len(placeComputed)-1, -1, -1):
+            if f"this['{placeComputed[idx].name}']" in repr(__get_type__(cIn, Computed).func):
+                placeComputed.insert(idx+1, cIn)
+                break
+        else:
+            placeComputed.insert(0, cIn)
+    return placeComputed
 
 @dataclass
 class _stretchOfFixedLen:
@@ -2410,21 +2421,19 @@ class Struct(Construct):
     def __init__(self, *subcons, **subconskw):
         super().__init__()
         self.subcons = list(subcons) + list(k/v for k,v in subconskw.items())
+  
+        try:
+            computed1 = [item for item in self.subcons if __is_type__(item, Computed)]
+            for _ in range(2):
+                # The first run orders all items in the order, but the correct start point 
+                # might be in the middle, the second rum moves it to the beginning... 
+                computed = computed1 = __orderComputedParts(computed1, [])
+            subcons  = [item for item in self.subcons if not __is_type__(item, Computed)]
+            self.subcons = __orderComputedParts(computed, subcons)
+        except Exception as e:
+            pass
         self._subcons = Container((sc.name,sc) for sc in self.subcons if sc.name)
         self.flagbuildnone = all(sc.flagbuildnone for sc in self.subcons)
-
-        try:
-            computedWithInput = [item for item in self.subcons if __is_type__(item, Computed)]
-            self.subcons      = [item for item in self.subcons if not __is_type__(item, Computed)]
-            for cIn in computedWithInput:
-                for idx in range(len(self.subcons)-1, -1, -1):
-                    if f"this['{self.subcons[idx].name}']" in repr(cIn.func):
-                        self.subcons.insert(idx+1, cIn)
-                        break
-                else:
-                    self.subcons.insert(0, cIn)
-        except:
-            pass
 
     def __getattr__(self, name):
         if name in self._subcons:
@@ -2511,12 +2520,12 @@ class Struct(Construct):
                     currentStretchOfFixedLen.fmtstring = f"{currentStretchOfFixedLen.fmtstring}{fieldFormatStr}"
                 else:
                     # change of byte order mid parsing... 
-                    block = materializeCollectedFixedSizeElements(currentStretchOfFixedLen, block, code, Name2LocalVar)
+                    block = __materializeCollectedFixedSizeElements__(currentStretchOfFixedLen, block, code, Name2LocalVar)
                     currentStretchOfFixedLen = _stretchOfFixedLen(length=0, fmtstring=fieldFormatStr, convertercmd="", names=[])
                 currentStretchOfFixedLen.length += sc.length
                 currentStretchOfFixedLen.names.append(sc.name)
             else: # a variable length item, or optional item
-                block = materializeCollectedFixedSizeElements(currentStretchOfFixedLen, block, code, Name2LocalVar)
+                block = __materializeCollectedFixedSizeElements__(currentStretchOfFixedLen, block, code, Name2LocalVar)
                 currentResult = "{"+ ", ".join(f"'{name}':{localVar}" for localVar, name  in  localVars2NameDict.items() if localVar in block)+ "}"
                 if __is_type__(sc, Optional):
                     try:
@@ -2540,13 +2549,13 @@ class Struct(Construct):
                 {f'{Name2LocalVar[sc.name]} = ' if sc.name else ''}{sc._compileparse(code)}"""
                 block = block.replace("__current_result__", currentResult)
                 currentStretchOfFixedLen = _stretchOfFixedLen(length=0, fmtstring="", convertercmd="", names=[])
-        block = materializeCollectedFixedSizeElements(currentStretchOfFixedLen, block, code, Name2LocalVar)
+        block = __materializeCollectedFixedSizeElements__(currentStretchOfFixedLen, block, code, Name2LocalVar)
         currentResult = "{"+ ", ".join(f"'{name}':{localVar}" for localVar, name  in localVars2NameDict.items() if (localVar in block) and name)+ "}"
         block += f"""
                 return Container({currentResult})"""
         for name, value in Name2LocalVar.items():
             block = block.replace(f"this['{name}']", value)
-        block, (argnames, passnames) = reduceDependancyDepth(block, code)
+        block, (argnames, passnames) = __reduceDependancyDepth__(block, code)
         if ("this" not in block):
             code.append(f"""def {fname}(io{passnames}):""" + block)
             return f"{fname}(io{argnames})"
