@@ -1199,13 +1199,14 @@ class FormatField(Construct):
         return self.length
 
     def _emitparse(self, code):
-        if self.fmtstr not in {"B", "b", "<B", ">B"}:
+        if self.fmtstr in {"B", "<B", ">B"}:
+            return f"(io.read({self.length}))[0]"
+        elif self.fmtstr in {"b", "<b", ">b"}:
+            return f"[_temp := (io.read({self.length}))[0], _temp-(_temp&0x80)][0]"
+        else:
             fname = f"formatfield_{code.allocateId()}"
             code.append(f"{fname}_unpack = struct.Struct({repr(self.fmtstr)}).unpack")
             return f"{fname}_unpack(io.read({self.length}))[0]"
-        else:
-            return f"(io.read({self.length}))[0]"
-            
 
     def _emitbuild(self, code):
         fname = f"formatfield_{code.allocateId()}"
@@ -1228,14 +1229,18 @@ class FormatField(Construct):
             return "f%s%s" % (self.length, "le" if swapped else "be", )
         
     def _emitparse_optional(self, block, code, name_of_parsed_item):
-        structname = f"formatfield_{code.allocateId()}"
-        code.append(f"{structname} = struct.Struct({repr(self.fmtstr)})")
         if name_of_parsed_item:
-            assignment = f"({name_of_parsed_item},) = {structname}.unpack(readBuf)"
+            if all(item in {">", "<", "B"} for item in self.fmtstr):
+                assignment = f"({name_of_parsed_item},) = readBuf"
+            elif all(item in {">", "<", "b"} for item in self.fmtstr):
+                assignment = f"({name_of_parsed_item},) = readBuf; name_of_parsed_item = name_of_parsed_item - (name_of_parsed_item&0x80)"
+            else:
+                structname = f"formatfield_{code.allocateId()}"
+                code.append(f"{structname} = struct.Struct({repr(self.fmtstr)})")
+                assignment = f"({name_of_parsed_item},) = {structname}.unpack(readBuf)"
         else:
             assignment = ""
         block += f"""
-                fallback = io.tell()
                 readBuf = io.read({self.length})
                 readBufLen = len(readBuf)
                 if readBufLen == {self.length}:
@@ -1243,7 +1248,7 @@ class FormatField(Construct):
                 elif readBufLen == 0:
                     return Container(__current_result__) #we are at the end of the stream....
                 else:
-                    io.seek(fallback)"""
+                    io.seek(io.tell()-readBufLen)"""
         return block
 
 
@@ -1861,20 +1866,29 @@ def PascalString(lengthfield, encoding):
             assignment = f"{name_of_parsed_item} = readBuf.decode({repr(encoding)})"
         else:
             assignment = "pass"
-        block = lengthfield._emitparse_optional(block, code, "_lenOfPascalString")
+        if lengthfield.fmtstr in {"B", ">B", "<B"}:
+            block += """
+                readBuf = io.read(1)
+                readBufLen = len(readBuf)
+                if readBufLen == 1:
+                    _lenOfPascalString = readBuf[0]
+                else:
+                    return Container(__current_result__) #we are at the end of the stream....
+                """
+        else:
+            block = lengthfield._emitparse_optional(block, code, "_lenOfPascalString")
         block += f"""
-                fallback = io.tell()
                 readBuf = io.read(_lenOfPascalString)
                 readBufLen = len(readBuf)
                 if readBufLen == _lenOfPascalString:
                     try:
                         {assignment}
                     except:
-                        io.seek(fallback)
+                        io.seek(io.tell()-1-readBufLen)
                 elif readBufLen == 0:
                     return Container(__current_result__) #we are at the end of the stream....
                 else:
-                    io.seek(fallback)"""
+                    io.seek(io.tell()-1-readBufLen)"""
         return block
 
 
@@ -2297,8 +2311,9 @@ class Mapping(Adapter):
 # structures and sequences
 #===============================================================================
 
-def __is_type__(sc, type):
-    while True:
+def __is_type__(sc, type, maxDepth=-1):
+    while maxDepth!=0:
+        maxDepth-=1
         if isinstance(sc, type):
             return True
         elif hasattr(sc, "subcon"):
@@ -2331,13 +2346,20 @@ def __reduceDependancyDepth__(block, code):
 
 def __materializeCollectedFixedSizeElements__(currentStretchOfFixedLen, block, code, Name2LocalVar):
     if currentStretchOfFixedLen.names: #There is at least one item to be parsed using a struct
-        structname = f"formatfield_{code.allocateId()}"
-        code.append(f"{structname} = struct.Struct({repr(currentStretchOfFixedLen.fmtstring)}) # {currentStretchOfFixedLen.length}\n")
-        _intermediate = f"""({", ".join(f"{Name2LocalVar[item]}" for item in currentStretchOfFixedLen.names)}, ) = ({structname}.unpack(io.read({currentStretchOfFixedLen.length})))"""
-        return block + f"""
+        if all(item in {">", "<", "B"} for item in (currentStretchOfFixedLen.fmtstring)):
+            _intermediate = f"""({", ".join(f"{Name2LocalVar[item]}" for item in currentStretchOfFixedLen.names)}, ) = io.read({currentStretchOfFixedLen.length})"""
+            return block + f"""
                 {_intermediate}
                 {currentStretchOfFixedLen.convertercmd}
-    """
+"""
+        else:
+            structname = f"formatfield_{code.allocateId()}"
+            code.append(f"{structname} = struct.Struct({repr(currentStretchOfFixedLen.fmtstring)}) # {currentStretchOfFixedLen.length}\n")
+            _intermediate = f"""({", ".join(f"{Name2LocalVar[item]}" for item in currentStretchOfFixedLen.names)}, ) = ({structname}.unpack(io.read({currentStretchOfFixedLen.length})))"""
+            return block + f"""
+                {_intermediate}
+                {currentStretchOfFixedLen.convertercmd}
+"""
     return block
 
 
@@ -2496,12 +2518,12 @@ class Struct(Construct):
         currentStretchOfFixedLen = _stretchOfFixedLen(length=0, fmtstring="", convertercmd="", names=[])
 
         for sc in self.subcons:
-            if __is_type__(sc, StringEncoded) and hasattr(sc, "_encoding") and  hasattr(sc, "_length"): #its a padded string StringEncoded
+            if __is_type__(sc, StringEncoded, 2) and hasattr(sc, "_encoding") and  hasattr(sc, "_length"): #its a padded string StringEncoded
                 currentStretchOfFixedLen.convertercmd += f"{Name2LocalVar[sc.name]} = {Name2LocalVar[sc.name]}.decode('{sc._encoding}').replace('\\x00', '');"
                 currentStretchOfFixedLen.fmtstring += f"{sc._length}s"
                 currentStretchOfFixedLen.length += sc._length
                 currentStretchOfFixedLen.names.append(sc.name)
-            elif isinstance(sc, FormatField): #its a fixed length fmtstr entry
+            elif __is_type__(sc, FormatField, 3): #its a fixed length fmtstr entry
                 noByteOrderForSingleByteItems = {"<B":"B", ">B":"B", 
                                                  "<b":"b", ">b":"b",
                                                  "<x":"x", ">x":"x",
