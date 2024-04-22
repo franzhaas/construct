@@ -2136,7 +2136,7 @@ class Enum(Adapter):
     def _emitparse(self, code):
         fname = f"factory_{code.allocateId()}"
         code.append(f"{fname} = {repr(self.decmapping)}")
-        return f"reuse(({self.subcon._compileparse(code)}), lambda x: {fname}.get(x, EnumInteger(x)))"
+        return f"[x:={self.subcon._compileparse(code)}, {fname}.get(x, EnumInteger(x))][1]"
 
     def _emitbuild(self, code):
         fname = f"factory_{code.allocateId()}"
@@ -2241,7 +2241,7 @@ class FlagsEnum(Adapter):
             raise MappingError("building failed, unknown label: %r" % (obj,), path=path)
 
     def _emitparse(self, code):
-        return f"reuse(({self.subcon._compileparse(code)}), lambda x: Container({', '.join(f'{k}=bool(x & {v} == {v})' for k,v in self.flags.items()) }))"
+        return f"[x:=({self.subcon._compileparse(code)}), Container({', '.join(f'{k}=bool(x & {v} == {v})' for k,v in self.flags.items()) })][1]"
 
     def _emitseq(self, ksy, bitwise):
         bitstotal = self.subcon.sizeof() * 8
