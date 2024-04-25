@@ -1247,10 +1247,15 @@ class FormatField(Construct):
                 readBufLen = len(readBuf)
                 if readBufLen == {self.length}:
                     {assignment}
-                elif readBufLen == 0:
-                    return Container(__current_result__) #we are at the end of the stream....
-                else:
+"""
+        if self.length > 1:
+            block += f"""
+                elif readBufLen > 0:
                     io.seek(io.tell()-readBufLen)"""
+        block += """
+                else:
+                    return Container(__current_result__) #we are at the end of the stream....
+                    """
         return block
 
 
@@ -4364,7 +4369,7 @@ class IfThenElse(Construct):
             aid = code.allocateId()
             code.userfunction[aid] = self.condfunc
             return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), f"userfunction[{aid}](Container({{**this,**__current_result__}}))", self.elsesubcon._compileparse(code), )
-
+    
     def _emitbuild(self, code):
         if isinstance(self.condfunc, ExprMixin) or (not callable(self.condfunc)):
             return f"(({self.thensubcon._compilebuild(code)}) if ({repr(self.condfunc)}) else ({self.elsesubcon._compilebuild(code)}))"
