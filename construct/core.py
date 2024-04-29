@@ -267,6 +267,7 @@ class CodeGen:
         self.linkedinstances = {}
         self.linkedparsers = {}
         self.linkedbuilders = {}
+        self.userfunction = {}
 
     def allocateId(self):
         self.nextid += 1
@@ -535,6 +536,7 @@ class Construct(object):
             linkedinstances = {}
             linkedparsers = {}
             linkedbuilders = {}
+            userfunction = {}
 
             len_ = len
             sum_ = sum
@@ -564,6 +566,7 @@ class Construct(object):
         module.linkedinstances = code.linkedinstances
         module.linkedparsers = code.linkedparsers
         module.linkedbuilders = code.linkedbuilders
+        module.userfunction = code.userfunction
         compiled = module.compiled
         compiled.source = source
         compiled.module = module
@@ -3007,7 +3010,12 @@ class Rebuild(Subconstruct):
         return self.subcon._compileparse(code)
 
     def _emitbuild(self, code):
-        return f"reuse({repr(self.func)}, lambda obj: ({self.subcon._compilebuild(code)}))"
+        if isinstance(self.func, ExprMixin) or (not callable(self.func)):
+            return f"reuse({repr(self.func)}, lambda obj: ({self.subcon._compilebuild(code)}))"
+        else:
+            aid = code.allocateId()
+            code.userfunction[aid] = self.func
+            return f"reuse(userfunction[{aid}](this), lambda obj: ({self.subcon._compilebuild(code)}))"
 
     def _emitseq(self, ksy, bitwise):
         return self.subcon._compileseq(ksy, bitwise)
