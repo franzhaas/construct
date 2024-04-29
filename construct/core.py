@@ -2304,12 +2304,64 @@ class Struct(Construct):
                 this['_root'] = this['_'].get('_root', this)
                 try:
         """
-        for sc in self.subcons:
-            block += f"""
+
+        subcons = self.subcons.copy()
+
+        while subcons:
+            _names = []
+            _len = 0
+            _fmtstrings = ""
+            
+            while True:
+                try:
+                    sc = subcons.pop(0)
+                    if hasattr(sc, "subcon") and  hasattr(sc.subcon, "subcon") and isinstance(sc.subcon.subcon, Optional):
+                        raise Exception("optional element")
+
+                    fieldName = sc.name
+                    fieldLen = sc.length
+                    fieldFormatStr = sc.fmtstr
+                    if _fmtstrings and fieldFormatStr[0] in {">", "<"}:
+                        if fieldFormatStr[0] != _fmtstrings[0]:
+                            raise Exception()
+                        fieldFormatStr = fieldFormatStr[1:]
+                    _len = _len + fieldLen
+                    _fmtstrings = _fmtstrings+fieldFormatStr
+                    _names.append(fieldName)
+                    sc = None
+                except:                    
+                    if _names:
+                        structname = f"formatfield_{code.allocateId()}"
+                        code.append(f"{structname} = struct.Struct({repr(_fmtstrings)})\n")
+                        _intermediate = f"_intermediate = {structname}.unpack(io.read({_len}))"
+                        _results = "[" + ", ".join(f"result[{repr(item)}]" for item in _names) + f"] = _intermediate"
+                        _this = "[" + ", ".join(f"this[{repr(item)}]" for item in _names) + f"] = _intermediate" 
+                        block += f"""
+                    {_intermediate}
+                    {_results}
+                    {_this}
+                    """
+                    break      
+            if sc:
+                if hasattr(sc, "subcon") and  hasattr(sc.subcon, "subcon") and isinstance(sc.subcon.subcon, Optional):
+                    block += f"""
+                    try:
+                        fallback = io.tell()
+                        {f'result[{repr(sc.name)}] = this[{repr(sc.name)}] = ' if sc.name else ''}{sc.subcon.subcon.subcons[0]._compileparse(code)}
+                    except StopFieldError:
+                        pass
+                    except ExplicitError:
+                        raise
+                    except Exception:
+                        {f'result[{repr(sc.name)}] = this[{repr(sc.name)}] = '}None 
+                        io.seek(fallback)
+                    """
+                else:
+                    block += f"""
                     {f'result[{repr(sc.name)}] = this[{repr(sc.name)}] = ' if sc.name else ''}{sc._compileparse(code)}
-            """
+                    """
+
         block += f"""
-                    pass
                 except StopFieldError:
                     pass
                 return result
@@ -3973,7 +4025,7 @@ class Select(Construct):
 
 
 
-def Optional(subcon):
+class Optional(Select):
     r"""
     Makes an optional field.
 
@@ -3995,7 +4047,10 @@ def Optional(subcon):
         >>> d.build(None)
         b''
     """
-    return Select(subcon, Pass)
+    def __init__(self, subcon):
+        super().__init__()
+        self.subcons = [subcon, Pass]
+        self.flagbuildnone = any(sc.flagbuildnone for sc in self.subcons)
 
 
 def If(condfunc, subcon):
