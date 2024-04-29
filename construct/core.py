@@ -1226,8 +1226,7 @@ class FormatField(Construct):
         if format in "fd":
             assert not bitwise
             return "f%s%s" % (self.length, "le" if swapped else "be", )
-
-
+        
 class BytesInteger(Construct):
     r"""
     Field that packs integers of arbitrary size. Int24* fields use this class.
@@ -1836,6 +1835,7 @@ def PascalString(lengthfield, encoding):
 
     def _emitparse(code):
         return f"io.read({lengthfield._compileparse(code)}).decode({repr(encoding)})"
+    
     def _emitbuild(code):
         fname = f"build_struct_{code.allocateId()}"
         block = f"""
@@ -2290,7 +2290,7 @@ def materializeCollectedFixedSizeElements(currentStretchOfFixedLen, block, code,
     if currentStretchOfFixedLen.names: #There is at least one item to be parsed using a struct
         structname = f"formatfield_{code.allocateId()}"
         code.append(f"{structname} = struct.Struct({repr(currentStretchOfFixedLen.fmtstring)}) # {currentStretchOfFixedLen.length}\n")
-        _intermediate = f"""{", ".join(f"{Name2LocalVar[item]}" for item in currentStretchOfFixedLen.names)} = ({structname}.unpack(io.read({currentStretchOfFixedLen.length})))"""
+        _intermediate = f"""({", ".join(f"{Name2LocalVar[item]}" for item in currentStretchOfFixedLen.names)}, ) = ({structname}.unpack(io.read({currentStretchOfFixedLen.length})))"""
         return block + f"""
                 {_intermediate}
                 {currentStretchOfFixedLen.convertercmd}
@@ -2302,7 +2302,7 @@ class _stretchOfFixedLen:
     length: int
     fmtstring: str
     convertercmd: str
-    names: list[str]
+    names: list
 
 
 class Struct(Construct):
@@ -2435,7 +2435,7 @@ class Struct(Construct):
                 currentStretchOfFixedLen.fmtstring += f"{sc._length}s"
                 currentStretchOfFixedLen.length += sc._length
                 currentStretchOfFixedLen.names.append(sc.name)
-            elif hasattr(sc, "fmtstr") and  hasattr(sc, "_length"): #its a fixed length fmtstr entry
+            elif isinstance(sc, FormatField): #its a fixed length fmtstr entry
                 noByteOrderForSingleByteItems = {"<B":"B", ">B":"B", 
                                                  "<b":"b", ">b":"b",
                                                  "<x":"x", ">x":"x",
@@ -2458,15 +2458,14 @@ class Struct(Construct):
                     currentStretchOfFixedLen = _stretchOfFixedLen(length=0, fmtstring=fieldFormatStr, convertercmd="", names=[])
                 currentStretchOfFixedLen.length += sc.length
                 currentStretchOfFixedLen.names.append(sc.name)
-            else: # a variable length item
+            else: # a variable length item, or optional item
                 block = materializeCollectedFixedSizeElements(currentStretchOfFixedLen, block, code, Name2LocalVar)
                 currentResult = "{"+ ", ".join(f"'{name}':{localVar}" for localVar, name  in  localVars2NameDict.items() if localVar in block)+ "}"
                 if __is_type__(sc, Optional):
-                    scOpt = __get_type__(sc, Optional)
                     block += f"""
                 try:
                     fallback = io.tell()
-                    {f'{Name2LocalVar[sc.name]} = ' if sc.name else ''}{scOpt.subcons[0]._compileparse(code)}
+                    {f'{Name2LocalVar[sc.name]} = ' if sc.name else ''}{sc.subcons[0]._compileparse(code)}
                 except ExplicitError:
                     raise
                 except Exception:
