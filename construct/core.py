@@ -1226,6 +1226,25 @@ class FormatField(Construct):
         if format in "fd":
             assert not bitwise
             return "f%s%s" % (self.length, "le" if swapped else "be", )
+        
+    def _emitparse_optional(self, block, code, name_of_parsed_item):
+        structname = f"formatfield_{code.allocateId()}"
+        code.append(f"{structname} = struct.Struct({repr(self.fmtstr)})")
+        if name_of_parsed_item:
+            assignment = f"({name_of_parsed_item},) = {structname}.unpack(readBuf)"
+        else:
+            assignment = ""
+        block += f"""
+                fallback = io.tell()
+                readBuf = io.read({self.length})
+                readBufLen = len(readBuf)
+                if readBufLen == {self.length}:
+                    {assignment}
+                elif readBufLen == 0:
+                    return Container(__current_result__) #we are at the end of the stream....
+                else:
+                    io.seek(fallback)"""
+        return block
 
 
 class BytesInteger(Construct):
@@ -1836,6 +1855,29 @@ def PascalString(lengthfield, encoding):
 
     def _emitparse(code):
         return f"io.read({lengthfield._compileparse(code)}).decode({repr(encoding)})"
+    
+    def _emitparse_optional(block, code, name_of_parsed_item):
+        if name_of_parsed_item:
+            assignment = f"{name_of_parsed_item} = readBuf.decode({repr(encoding)})"
+        else:
+            assignment = "pass"
+        block = lengthfield._emitparse_optional(block, code, "_lenOfPascalString")
+        block += f"""
+                fallback = io.tell()
+                readBuf = io.read(_lenOfPascalString)
+                readBufLen = len(readBuf)
+                if readBufLen == _lenOfPascalString:
+                    try:
+                        {assignment}
+                    except:
+                        io.seek(fallback)
+                elif readBufLen == 0:
+                    return Container(__current_result__) #we are at the end of the stream....
+                else:
+                    io.seek(fallback)"""
+        return block
+
+
     def _emitbuild(code):
         fname = f"build_struct_{code.allocateId()}"
         block = f"""
@@ -1854,6 +1896,7 @@ def PascalString(lengthfield, encoding):
 
     macro._emitparse = _emitparse
     macro._emitbuild = _emitbuild
+    macro._emitparse_optional = _emitparse_optional
 
     def _emitseq(ksy, bitwise):
         return [
@@ -2290,7 +2333,7 @@ def materializeCollectedFixedSizeElements(currentStretchOfFixedLen, block, code,
     if currentStretchOfFixedLen.names: #There is at least one item to be parsed using a struct
         structname = f"formatfield_{code.allocateId()}"
         code.append(f"{structname} = struct.Struct({repr(currentStretchOfFixedLen.fmtstring)}) # {currentStretchOfFixedLen.length}\n")
-        _intermediate = f"""{", ".join(f"{Name2LocalVar[item]}" for item in currentStretchOfFixedLen.names)} = ({structname}.unpack(io.read({currentStretchOfFixedLen.length})))"""
+        _intermediate = f"""({", ".join(f"{Name2LocalVar[item]}" for item in currentStretchOfFixedLen.names)}, ) = ({structname}.unpack(io.read({currentStretchOfFixedLen.length})))"""
         return block + f"""
                 {_intermediate}
                 {currentStretchOfFixedLen.convertercmd}
@@ -2302,7 +2345,7 @@ class _stretchOfFixedLen:
     length: int
     fmtstring: str
     convertercmd: str
-    names: list[str]
+    names: list
 
 
 class Struct(Construct):
@@ -2435,7 +2478,7 @@ class Struct(Construct):
                 currentStretchOfFixedLen.fmtstring += f"{sc._length}s"
                 currentStretchOfFixedLen.length += sc._length
                 currentStretchOfFixedLen.names.append(sc.name)
-            elif hasattr(sc, "fmtstr") and  hasattr(sc, "_length"): #its a fixed length fmtstr entry
+            elif isinstance(sc, FormatField): #its a fixed length fmtstr entry
                 noByteOrderForSingleByteItems = {"<B":"B", ">B":"B", 
                                                  "<b":"b", ">b":"b",
                                                  "<x":"x", ">x":"x",
@@ -2458,15 +2501,17 @@ class Struct(Construct):
                     currentStretchOfFixedLen = _stretchOfFixedLen(length=0, fmtstring=fieldFormatStr, convertercmd="", names=[])
                 currentStretchOfFixedLen.length += sc.length
                 currentStretchOfFixedLen.names.append(sc.name)
-            else: # a variable length item
+            else: # a variable length item, or optional item
                 block = materializeCollectedFixedSizeElements(currentStretchOfFixedLen, block, code, Name2LocalVar)
                 currentResult = "{"+ ", ".join(f"'{name}':{localVar}" for localVar, name  in  localVars2NameDict.items() if localVar in block)+ "}"
                 if __is_type__(sc, Optional):
-                    scOpt = __get_type__(sc, Optional)
-                    block += f"""
+                    try:
+                        block = sc.subcons[0]._emitparse_optional(block, code, Name2LocalVar[sc.name])
+                    except AttributeError as e:
+                        block += f"""
                 try:
                     fallback = io.tell()
-                    {f'{Name2LocalVar[sc.name]} = ' if sc.name else ''}{scOpt.subcons[0]._compileparse(code)}
+                    {f'{Name2LocalVar[sc.name]} = ' if sc.name else ''}{sc.subcons[0]._compileparse(code)}
                 except ExplicitError:
                     raise
                 except Exception:
