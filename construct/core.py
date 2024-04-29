@@ -1234,14 +1234,14 @@ class FormatField(Construct):
         if name_of_parsed_item:
             if self.fmtstr in {"B", "<B", ">B"}:
                 assignment = f"({name_of_parsed_item},) = readBuf"
-            if self.fmtstr in {"b", "<b", ">b"}:
+            elif self.fmtstr in {"b", "<b", ">b"}:
                 assignment = f"{name_of_parsed_item} = [_tmp = readBuf[0], (_temp&0x7F)-(0x80&_temp)][1]"
             else:
                 structname = f"formatfield_{code.allocateId()}"
                 code.append(f"{structname} = struct.Struct({repr(self.fmtstr)})")
                 assignment = f"({name_of_parsed_item},) = {structname}.unpack(readBuf)"
         else:
-            assignment = ""
+            assignment = "pass"
         block += f"""
                 readBuf = io.read({self.length})
                 readBufLen = len(readBuf)
@@ -1865,19 +1865,20 @@ def PascalString(lengthfield, encoding):
     
     def _emitparse_optional(block, code, name_of_parsed_item):
         if name_of_parsed_item:
-            assignment = f"{name_of_parsed_item} = readBuf.decode({repr(encoding)})"
+            assignment = f"""
+                    try:
+                        {name_of_parsed_item} = readBuf.decode({repr(encoding)})
+                    except:
+                        io.seek(io.tell()-readBufLen-{lengthfield.length})
+"""
         else:
             assignment = "pass"
         block = lengthfield._emitparse_optional(block, code, "_lenOfPascalString")
         block += f"""
-                
                 readBuf = io.read(_lenOfPascalString)
                 readBufLen = len(readBuf)
                 if readBufLen == _lenOfPascalString:
-                    try:
-                        {assignment}
-                    except:
-                        io.seek(io.tell()-readBufLen-{lengthfield.length})
+                    {assignment}    
                 elif readBufLen == 0:
                     return Container(__current_result__) #we are at the end of the stream....
                 else:
@@ -2516,7 +2517,7 @@ class Struct(Construct):
                 currentStretchOfFixedLen.fmtstring += f"{sc._length}s"
                 currentStretchOfFixedLen.length += sc._length
                 currentStretchOfFixedLen.names.append(sc.name)
-            elif isinstance(sc, FormatField): #its a fixed length fmtstr entry
+            elif __is_type__(sc, FormatField, 3) and hasattr(sc, "fmtstr"): #its a fixed length fmtstr entry
                 name = sc.name
                 noByteOrderForSingleByteItems = {"<B":"B", ">B":"B", 
                                                  "<b":"b", ">b":"b",
@@ -4228,7 +4229,7 @@ class Select(Construct):
                 except ExplicitError:
                     raise
                 except Exception:
-                    io.seek(io, fallback, 0)
+                    io.seek(fallback)
                 """
         code.append(block)
         return "%s(io, this)" % (fname,)
