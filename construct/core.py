@@ -1235,7 +1235,7 @@ class FormatField(Construct):
             if self.fmtstr in {"B", "<B", ">B"}:
                 assignment = f"({name_of_parsed_item},) = readBuf"
             elif self.fmtstr in {"b", "<b", ">b"}:
-                assignment = f"{name_of_parsed_item} = [_tmp = readBuf[0], (_temp&0x7F)-(0x80&_temp)][1]"
+                assignment = f"{name_of_parsed_item} = [_temp := readBuf[0], (_temp&0x7F)-(0x80&_temp)][1]"
             else:
                 structname = f"formatfield_{code.allocateId()}"
                 code.append(f"{structname} = struct.Struct({repr(self.fmtstr)})")
@@ -4369,6 +4369,29 @@ class IfThenElse(Construct):
             aid = code.allocateId()
             code.userfunction[aid] = self.condfunc
             return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), f"userfunction[{aid}](Container({{**this,**__current_result__}}))", self.elsesubcon._compileparse(code), )
+        
+    def _emitparse_optional(self, block, code, name_of_parsed_item):
+        def _indent(block):
+            return (f"{os.linesep}    ").join(block.split(os.linesep))
+        
+        if isinstance(self.condfunc, ExprMixin) or (not callable(self.condfunc)):
+            funcString = self.condfunc
+        else:
+            aid = code.allocateId()
+            code.userfunction[aid] = self.condfunc
+            funcString = f"userfunction[{aid}](Container({{**this,**__current_result__}}))"
+        block += f"""
+                if  {funcString}:
+                    {_indent(self.thensubcon._emitparse_optional("", code, name_of_parsed_item))}
+"""
+        if self.elsesubcon != Pass:
+            print(self.elsesubcon)
+            block += f"""
+                else:
+                    {_indent(self.elsesubcon._emitparse_optional("", code, name_of_parsed_item))}
+"""
+        return block
+
     
     def _emitbuild(self, code):
         if isinstance(self.condfunc, ExprMixin) or (not callable(self.condfunc)):
@@ -5102,6 +5125,12 @@ class Pass(Construct):
 
     def _emitbuild(self, code):
         return "None"
+    
+    def _emitparse_optional(self, block, code, name_of_parsed_item):
+        block += f"""
+                {name_of_parsed_item} = None
+"""
+        return block
 
     def _emitfulltype(self, ksy, bitwise):
         return dict(size=0)
