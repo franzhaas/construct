@@ -2469,7 +2469,7 @@ class Struct(Construct):
                 currentStretchOfFixedLen.fmtstring += f"{sc._length}s"
                 currentStretchOfFixedLen.length += sc._length
                 currentStretchOfFixedLen.names.append(sc.name)
-            elif isinstance(sc, FormatField): #its a fixed length fmtstr entry
+            elif __is_type__(sc, FormatField, 3) and hasattr(sc, "fmtstr"): #its a fixed length fmtstr entry
                 name = sc.name
                 noByteOrderForSingleByteItems = {"<B":"B", ">B":"B", 
                                                  "<b":"b", ">b":"b",
@@ -4178,7 +4178,7 @@ class Select(Construct):
                 except ExplicitError:
                     raise
                 except Exception:
-                    io.seek(io, fallback, 0)
+                    io.seek(fallback)
                 """
         code.append(block)
         return "%s(io, this)" % (fname,)

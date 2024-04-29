@@ -387,6 +387,29 @@ def test_enum_issue_992():
     x = d.parse(b"\x02")
     assert x == F.b
 
+
+def test_optional_pascal_string():
+    d = Struct("opt"/Optional(PascalString(Byte, "ascii")))
+    dc = d.compile()
+    for blob in [b"\x01a", b""]:
+        assert d.parse(blob) == dc.parse(blob)
+        assert d.build(dc.parse(blob)) == blob
+        assert dc.build(d.parse(blob)) == blob
+        assert dc.build(dc.parse(blob)) == blob
+        assert d.build(d.parse(blob)) == blob
+
+    for blob in  [b"\x01", b"\x01\xff"]:
+        assert d.parse(blob) == Container(opt=None)
+        assert dc.parse(blob) == Container(opt=None)
+    assert dc.parse(b"\x03abc") == Container(opt="abc")
+
+    d = Struct("opt1"/Optional(PascalString(Byte, "ascii")),
+               "opt2"/Optional(Int32ul))
+    dc = d.compile()
+    for blob in  [b"\x0111234", b"\x01\xff12"]:
+        assert d.parse(blob) == dc.parse(blob)
+
+
 def test_flagsenum():
     d = FlagsEnum(Byte, one=1, two=2, four=4, eight=8)
     common(d, b"\x03", Container(_flagsenum=True, one=True, two=True, four=False, eight=False), 1)
