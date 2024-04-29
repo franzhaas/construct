@@ -597,7 +597,7 @@ class Construct(object):
             return emitted
         except NotImplementedError:
             self._compileinstance(code)
-            return f"linkedparsers[{id(self)}](io, this, '(???)')"
+            return f"linkedparsers[{id(self)}](io, Container(**this), '(???)')"
 
     def _compilebuild(self, code):
         """Used internally."""
@@ -2299,8 +2299,8 @@ class Struct(Construct):
         fname = f"parse_struct_{code.allocateId()}"
         block = f"""
             def {fname}(io, this):
-                result = Container()
-                this = Container(_ = this, _params = this['_params'], _root = None, _parsing = True, _building = False, _sizing = False, _subcons = None, _io = io, _index = this.get('_index', None))
+                result = dict()
+                this = dict(_ = this, _params = this['_params'], _root = None, _parsing = True, _building = False, _sizing = False, _subcons = None, _io = io, _index = this.get('_index', None))
                 this['_root'] = this['_'].get('_root', this)
                 try:
         """
@@ -2364,7 +2364,7 @@ class Struct(Construct):
         block += f"""
                 except StopFieldError:
                     pass
-                return result
+                return Container(result)
         """
         code.append(block)
         return f"{fname}(io, this)"
@@ -3087,7 +3087,7 @@ class Rebuild(Subconstruct):
         else:
             aid = code.allocateId()
             code.userfunction[aid] = self.func
-            return f"reuse(userfunction[{aid}](this), lambda obj: ({self.subcon._compilebuild(code)}))"
+            return f"reuse(userfunction[{aid}](Container(this)), lambda obj: ({self.subcon._compilebuild(code)}))"
 
     def _emitseq(self, ksy, bitwise):
         return self.subcon._compileseq(ksy, bitwise)
@@ -4136,7 +4136,7 @@ class IfThenElse(Construct):
         else:
             aid = code.allocateId()
             code.userfunction[aid] = self.condfunc
-            return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), f"userfunction[{aid}](this)", self.elsesubcon._compileparse(code), )
+            return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), f"userfunction[{aid}](Container(this))", self.elsesubcon._compileparse(code), )
 
     def _emitbuild(self, code):
         if isinstance(self.condfunc, ExprMixin) or (not callable(self.condfunc)):
@@ -4144,7 +4144,7 @@ class IfThenElse(Construct):
         else:
             aid = code.allocateId()
             code.userfunction[aid] = self.condfunc
-            return f"(({self.thensubcon._compilebuild(code)}) if (userfunction[{aid}](this)) else ({self.elsesubcon._compilebuild(code)}))" 
+            return f"(({self.thensubcon._compilebuild(code)}) if (userfunction[{aid}](Container(this))) else ({self.elsesubcon._compilebuild(code)}))" 
 
     def _emitseq(self, ksy, bitwise):
         return [
@@ -4223,7 +4223,7 @@ class Switch(Construct):
         else:
             aid = code.allocateId()
             code.userfunction[aid] = self.keyfunc
-            return f"{fname}.get(userfunction[{aid}](this), {defaultfname})(io, this)"
+            return f"{fname}.get(userfunction[{aid}](Container(this)), {defaultfname})(io, this)"
 
     def _emitbuild(self, code):
         fname = f"switch_cases_{code.allocateId()}"
@@ -4237,7 +4237,7 @@ class Switch(Construct):
         else:
             aid = code.allocateId()
             code.userfunction[aid] = self.keyfunc
-            return f"{fname}.get(userfunction[{aid}](this), {defaultfname})(obj, io, this)"
+            return f"{fname}.get(userfunction[{aid}](Container(this)), {defaultfname})(obj, io, this)"
 
 
 class StopIf(Construct):
