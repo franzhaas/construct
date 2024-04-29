@@ -5,6 +5,7 @@ import struct, io, binascii, itertools, collections, pickle, sys, os, hashlib, i
 from construct.lib import *
 from construct.expr import *
 from construct.version import *
+import logging
 
 
 #===============================================================================
@@ -1905,6 +1906,8 @@ class EnumIntegerString(str):
     """Used internally."""
 
     def __repr__(self):
+        #Eventually this will just be the int value. This makes enums at runtime of
+        #compiled code just as fast as integers...
         return "EnumIntegerString.new(%s, %s)" % (self.intvalue, str.__repr__(self), )
 
     def __int__(self):
@@ -1916,6 +1919,18 @@ class EnumIntegerString(str):
         ret.intvalue = intvalue
         return ret
 
+    def __eq__(self, other):
+        if isinstance(other, int):
+            return (self.intvalue == other)
+        elif type(other) == type(self):
+            return (self.intvalue == other.intvalue)
+        elif isinstance(other, str):
+            logging.warning("Using a str to compare with a enum value is depricated! this may lead to bugs in the future!")
+            return str(self) == other
+        raise NotImplementedError(f"Cont compare {type(self)} to {type(other)} {other}")
+
+    def __hash__(self):
+        return str(self).__hash__()
 
 class Enum(Adapter):
     r"""
@@ -1969,6 +1984,8 @@ class Enum(Adapter):
         self.encmapping = {EnumIntegerString.new(v,k):v for k,v in mapping.items()}
         self.decmapping = {v:EnumIntegerString.new(v,k) for k,v in mapping.items()}
         self.ksymapping = {v:k for k,v in mapping.items()}
+        for k,v in mapping.items():
+            setattr(self, k, EnumIntegerString.new(v,k))
 
     def __getattr__(self, name):
         if name in self.encmapping:
@@ -1985,6 +2002,8 @@ class Enum(Adapter):
         try:
             if isinstance(obj, int):
                 return obj
+            if isinstance(obj, str):
+                logging.warning("Use enum typed values, not strings as enum values...")
             return self.encmapping[obj]
         except KeyError:
             raise MappingError("building failed, no mapping for %r" % (obj,), path=path)
@@ -3987,10 +4006,20 @@ class IfThenElse(Construct):
         return sc._sizeof(context, path)
 
     def _emitparse(self, code):
-        return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), self.condfunc, self.elsesubcon._compileparse(code), )
+        if isinstance(self.condfunc, ExprMixin) or (not callable(self.condfunc)):
+            return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), self.condfunc, self.elsesubcon._compileparse(code), )
+        else:
+            aid = code.allocateId()
+            code.userfunction[aid] = self.condfunc
+            return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), f"userfunction[{aid}](this)", self.elsesubcon._compileparse(code), )
 
     def _emitbuild(self, code):
-        return f"(({self.thensubcon._compilebuild(code)}) if ({repr(self.condfunc)}) else ({self.elsesubcon._compilebuild(code)}))"
+        if isinstance(self.condfunc, ExprMixin) or (not callable(self.condfunc)):
+            return f"(({self.thensubcon._compilebuild(code)}) if ({repr(self.condfunc)}) else ({self.elsesubcon._compilebuild(code)}))"
+        else:
+            aid = code.allocateId()
+            code.userfunction[aid] = self.condfunc
+            return f"(({self.thensubcon._compilebuild(code)}) if (userfunction[{aid}](this)) else ({self.elsesubcon._compilebuild(code)}))" 
 
     def _emitseq(self, ksy, bitwise):
         return [
@@ -4064,7 +4093,12 @@ class Switch(Construct):
             code.append(f"{fname}[{repr(key)}] = lambda io,this: {sc._compileparse(code)}")
         defaultfname = f"switch_defaultcase_{code.allocateId()}"
         code.append(f"{defaultfname} = lambda io,this: {self.default._compileparse(code)}")
-        return f"{fname}.get({repr(self.keyfunc)}, {defaultfname})(io, this)"
+        if isinstance(self.keyfunc, ExprMixin) or(not callable(self.keyfunc)):
+            return f"{fname}.get({repr(self.keyfunc)}, {defaultfname})(io, this)"
+        else:
+            aid = code.allocateId()
+            code.userfunction[aid] = self.keyfunc
+            return f"{fname}.get(userfunction[{aid}](this), {defaultfname})(io, this)"
 
     def _emitbuild(self, code):
         fname = f"switch_cases_{code.allocateId()}"
@@ -4073,7 +4107,12 @@ class Switch(Construct):
             code.append(f"{fname}[{repr(key)}] = lambda obj,io,this: {sc._compilebuild(code)}")
         defaultfname = f"switch_defaultcase_{code.allocateId()}"
         code.append(f"{defaultfname} = lambda obj,io,this: {self.default._compilebuild(code)}")
-        return f"{fname}.get({repr(self.keyfunc)}, {defaultfname})(obj, io, this)"
+        if isinstance(self.keyfunc, ExprMixin) or(not callable(self.keyfunc)):
+            return f"{fname}.get({repr(self.keyfunc)}, {defaultfname})(obj, io, this)"
+        else:
+            aid = code.allocateId()
+            code.userfunction[aid] = self.keyfunc
+            return f"{fname}.get(userfunction[{aid}](this), {defaultfname})(obj, io, this)"
 
 
 class StopIf(Construct):
