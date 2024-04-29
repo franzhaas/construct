@@ -1199,12 +1199,15 @@ class FormatField(Construct):
         return self.length
 
     def _emitparse(self, code):
-        if self.fmtstr not in {"B", "b", "<B", ">B"}:
+        if self.fmtstr in {"B", "<B", ">B"}:
+            return f"(io.read(1))[0]"
+        elif self.fmtstr in {"b", "<b", ">b"}:
+            return f"[_temp := io.read(1)[0], (_temp&0x7f)-(_temp&0x80)][1]"
+        else:
             fname = f"formatfield_{code.allocateId()}"
             code.append(f"{fname}_unpack = struct.Struct({repr(self.fmtstr)}).unpack")
             return f"{fname}_unpack(io.read({self.length}))[0]"
-        else:
-            return f"(io.read({self.length}))[0]"
+
             
 
     def _emitbuild(self, code):
@@ -2254,8 +2257,9 @@ class Mapping(Adapter):
 # structures and sequences
 #===============================================================================
 
-def __is_type__(sc, type):
-    while True:
+def __is_type__(sc, type, maxDepth=-1):
+    while maxDepth!=0:
+        maxDepth-=1
         if isinstance(sc, type):
             return True
         elif hasattr(sc, "subcon"):
@@ -2288,10 +2292,17 @@ def __reduceDependancyDepth__(block, code):
 
 def __materializeCollectedFixedSizeElements__(currentStretchOfFixedLen, block, code, Name2LocalVar):
     if currentStretchOfFixedLen.names: #There is at least one item to be parsed using a struct
-        structname = f"formatfield_{code.allocateId()}"
-        code.append(f"{structname} = struct.Struct({repr(currentStretchOfFixedLen.fmtstring)}) # {currentStretchOfFixedLen.length}\n")
-        _intermediate = f"""({", ".join(f"{Name2LocalVar[item]}" for item in currentStretchOfFixedLen.names)}, ) = ({structname}.unpack(io.read({currentStretchOfFixedLen.length})))"""
-        return block + f"""
+        if all(item in {">", "<", "B"} for item in (currentStretchOfFixedLen.fmtstring)):
+            _intermediate = f"""({", ".join(f"{Name2LocalVar[item]}" for item in currentStretchOfFixedLen.names)}, ) = io.read({currentStretchOfFixedLen.length})"""
+            return block + f"""
+                {_intermediate}
+                {currentStretchOfFixedLen.convertercmd}
+    """
+        else:
+            structname = f"formatfield_{code.allocateId()}"
+            code.append(f"{structname} = struct.Struct({repr(currentStretchOfFixedLen.fmtstring)}) # {currentStretchOfFixedLen.length}\n")
+            _intermediate = f"""({", ".join(f"{Name2LocalVar[item]}" for item in currentStretchOfFixedLen.names)}, ) = ({structname}.unpack(io.read({currentStretchOfFixedLen.length})))"""
+            return block + f"""
                 {_intermediate}
                 {currentStretchOfFixedLen.convertercmd}
     """
@@ -2459,11 +2470,15 @@ class Struct(Construct):
                 currentStretchOfFixedLen.length += sc._length
                 currentStretchOfFixedLen.names.append(sc.name)
             elif isinstance(sc, FormatField): #its a fixed length fmtstr entry
+                name = sc.name
                 noByteOrderForSingleByteItems = {"<B":"B", ">B":"B", 
                                                  "<b":"b", ">b":"b",
                                                  "<x":"x", ">x":"x",
                                                  "<c":"c", ">c":"c",}
-                fieldFormatStr = noByteOrderForSingleByteItems[sc.fmtstr] if sc.fmtstr in noByteOrderForSingleByteItems else sc.fmtstr
+                if sc.fmtstr in noByteOrderForSingleByteItems:
+                    fieldFormatStr = noByteOrderForSingleByteItems[sc.fmtstr]
+                else:
+                    fieldFormatStr = sc.fmtstr
                 if currentStretchOfFixedLen.fmtstring == "":
                     currentStretchOfFixedLen.fmtstring = fieldFormatStr
                 elif currentStretchOfFixedLen.fmtstring[0] in {">", "<"} and len (fieldFormatStr) >= 2 and currentStretchOfFixedLen.fmtstring[0] == fieldFormatStr[0]:
@@ -2480,7 +2495,7 @@ class Struct(Construct):
                     block = __materializeCollectedFixedSizeElements__(currentStretchOfFixedLen, block, code, Name2LocalVar)
                     currentStretchOfFixedLen = _stretchOfFixedLen(length=0, fmtstring=fieldFormatStr, convertercmd="", names=[])
                 currentStretchOfFixedLen.length += sc.length
-                currentStretchOfFixedLen.names.append(sc.name)
+                currentStretchOfFixedLen.names.append(name)
             else: # a variable length item, or optional item
                 block = __materializeCollectedFixedSizeElements__(currentStretchOfFixedLen, block, code, Name2LocalVar)
                 currentResult = "{"+ ", ".join(f"'{name}':{localVar}" for localVar, name  in  localVars2NameDict.items() if localVar in block)+ "}"
