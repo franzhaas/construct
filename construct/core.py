@@ -2321,8 +2321,8 @@ class Struct(Construct):
                     fieldName = sc.name
                     fieldLen = sc.length
                     fieldFormatStr = sc.fmtstr
-                    if _fmtstrings and fieldFormatStr[0] in {">", "<"}:
-                        if fieldFormatStr[0] != _fmtstrings[0]:
+                    if _fmtstrings and _fmtstrings[0] in {">", "<"}:
+                        if _fmtstrings[0] != _fmtstrings[0] and not (_fmtstrings[1] in {"B", "b"} and len(f) == 2):
                             raise Exception()
                         fieldFormatStr = fieldFormatStr[1:]
                     _len = _len + fieldLen
