@@ -1770,9 +1770,15 @@ def PaddedString(length, encoding):
         u'Афон'
     """
     macro = StringEncoded(FixedSized(length, NullStripped(GreedyBytes, pad=encodingunit(encoding))), encoding)
+
     def _emitfulltype(ksy, bitwise):
-        return dict(size=length, type="strz", encoding=encoding)
+        return dict(size=length, type="str", encoding=encoding)
     macro._emitfulltype = _emitfulltype
+
+    def _emitparse(code):
+        return f"io.read({length}).decode('{encoding}').replace('\\x00', '')"
+    
+    macro._emitparse = _emitparse
     return macro
 
 
