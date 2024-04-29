@@ -1229,7 +1229,11 @@ class FormatField(Construct):
         if format in "fd":
             assert not bitwise
             return "f%s%s" % (self.length, "le" if swapped else "be", )
+<<<<<<< HEAD
         
+=======
+
+>>>>>>> 86ff410 (- more optional compilers, IfThenElse, Pass)
 class BytesInteger(Construct):
     r"""
     Field that packs integers of arbitrary size. Int24* fields use this class.
@@ -1838,7 +1842,7 @@ def PascalString(lengthfield, encoding):
 
     def _emitparse(code):
         return f"io.read({lengthfield._compileparse(code)}).decode({repr(encoding)})"
-    
+
     def _emitbuild(code):
         fname = f"build_struct_{code.allocateId()}"
         block = f"""
@@ -5046,7 +5050,7 @@ class Pass(Construct):
 
     def _emitbuild(self, code):
         return "None"
-
+    
     def _emitfulltype(self, ksy, bitwise):
         return dict(size=0)
 
