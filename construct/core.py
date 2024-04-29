@@ -1,11 +1,24 @@
 # -*- coding: utf-8 -*-
 
-import struct, io, binascii, itertools, collections, pickle, sys, os, hashlib, importlib, importlib.machinery, importlib.util
-
+import struct
+import io
+import binascii
+import itertools
+import collections
+import pickle
+import sys
+import hashlib
+import importlib
+import importlib.machinery
+import importlib.util
+from io import SEEK_SET as io_SEEK_SET
 from construct.lib import *
 from construct.expr import *
 from construct.version import *
 import logging
+import re
+from dataclasses import dataclass
+import os
 
 
 #===============================================================================
@@ -122,6 +135,8 @@ class StopFieldError(ConstructError):
     Only one parsing class can raise this exception: StopIf. It can mean the given condition was met during parsing or building.
     """
     pass
+
+
 class PaddingError(ConstructError):
     """
     Multiple parsing classes can raise this exception: PaddedString Padding Padded Aligned FixedSized NullTerminated NullStripped. It can mean multiple issues: the encoded string or bytes takes more bytes than padding allows, length parameter was invalid, pattern terminator or pad is not a proper bytes value, modulus was less than 2.
@@ -251,8 +266,8 @@ class BytesIOWithOffsets(io.BytesIO):
     def tell(self) -> int:
         return super().tell() + self.parent_stream_offset
 
-    def seek(self, offset: int, whence: int = io.SEEK_SET) -> int:
-        if whence != io.SEEK_SET:
+    def seek(self, offset: int, whence: int = io_SEEK_SET) -> int:
+        if whence != io_SEEK_SET:
             super().seek(offset, whence)
         else:
             super().seek(offset - self.parent_stream_offset)
@@ -509,7 +524,7 @@ class Construct(object):
     def _actualsize(self, stream, context, path):
         return self._sizeof(context, path)
 
-    def compile(self, filename=None):
+    def compile(self, filename=None, containertype="Container"):
         """
         Transforms a construct into another construct that does same thing (has same parsing and building semantics) but is much faster when parsing. Already compiled instances just compile into itself.
 
@@ -525,6 +540,8 @@ class Construct(object):
             from construct import *
             from construct.lib import *
             from io import BytesIO
+            from io import SEEK_END as io_SEEK_END
+            from io import SEEK_SET as io_SEEK_SET
             import struct
             import collections
             import itertools
@@ -546,13 +563,17 @@ class Construct(object):
             abs_ = abs
         """)
         code.append(f"""
+            Container = {containertype}
+            """)
+        code.append(f"""
             def parseall(io, this):
                 return {self._compileparse(code)}
             def buildall(obj, io, this):
                 return {self._compilebuild(code)}
             compiled = Compiled(parseall, buildall)
         """)
-        source = code.toString()
+        source = code.toString().replace("dict(this)", "this")
+        source = code.toString().replace("__current_result__", "{}")
 
         if filename:
             with open(filename, "wt") as f:
@@ -561,6 +582,8 @@ class Construct(object):
         modulename = hexlify(hashlib.sha1(source.encode()).digest()).decode()
         module_spec = importlib.machinery.ModuleSpec(modulename, None)
         module = importlib.util.module_from_spec(module_spec)
+        with open("p.py", "w") as f:
+            f.write(source)
         c = compile(source, '', 'exec')
         exec(c, module.__dict__)
 
@@ -597,7 +620,7 @@ class Construct(object):
             return emitted
         except NotImplementedError:
             self._compileinstance(code)
-            return f"linkedparsers[{id(self)}](io, Container(**this), '(???)')"
+            return f"linkedparsers[{id(self)}](io, Container(**({{**this,**__current_result__}})), '(???)')"
 
     def _compilebuild(self, code):
         """Used internally."""
@@ -825,7 +848,7 @@ class Adapter(Subconstruct):
 
     def _build(self, obj, stream, context, path):
         obj2 = self._encode(obj, context, path)
-        buildret = self.subcon._build(obj2, stream, context, path)
+        self.subcon._build(obj2, stream, context, path)
         return obj
 
     def _decode(self, obj, context, path):
@@ -877,7 +900,7 @@ class Tunnel(Subconstruct):
 
     def _build(self, obj, stream, context, path):
         stream2 = io.BytesIO()
-        buildret = self.subcon._build(obj, stream2, context, path)
+        self.subcon._build(obj, stream2, context, path)
         data = stream2.getvalue()
         data = self._encode(data, context, path)
         stream_write(stream, data, len(data), path)
@@ -984,7 +1007,7 @@ class Bytes(Construct):
         return f"io.read({self.length})"
 
     def _emitbuild(self, code):
-        return f"(io.write(obj), obj)[1]"
+        return "(io.write(obj), obj)[1]"
 
     def _emitfulltype(self, ksy, bitwise):
         return dict(size=self.length)
@@ -1019,10 +1042,10 @@ class GreedyBytes(Construct):
         return data
 
     def _emitparse(self, code):
-        return f"io.read()"
+        return "io.read()"
 
     def _emitbuild(self, code):
-        return f"(io.write(obj), obj)[1]"
+        return "(io.write(obj), obj)[1]"
 
     def _emitfulltype(self, ksy, bitwise):
         return dict(size_eos=True)
@@ -1176,9 +1199,13 @@ class FormatField(Construct):
         return self.length
 
     def _emitparse(self, code):
-        fname = f"formatfield_{code.allocateId()}"
-        code.append(f"{fname} = struct.Struct({repr(self.fmtstr)})")
-        return f"{fname}.unpack(io.read({self.length}))[0]"
+        if self.fmtstr not in {"B", "b", "<B", ">B"}:
+            fname = f"formatfield_{code.allocateId()}"
+            code.append(f"{fname}_unpack = struct.Struct({repr(self.fmtstr)}).unpack")
+            return f"{fname}_unpack(io.read({self.length}))[0]"
+        else:
+            return f"(io.read({self.length}))[0]"
+            
 
     def _emitbuild(self, code):
         fname = f"formatfield_{code.allocateId()}"
@@ -1778,7 +1805,13 @@ def PaddedString(length, encoding):
     def _emitparse(code):
         return f"io.read({length}).decode('{encoding}').replace('\\x00', '')"
     
+    def _emitbuild(code):
+        return f"(io.write(b'\\00'*{length} if obj == '' else obj.ljust({length}, '\\00').encode('{encoding}')[:{length}]))"
+
     macro._emitparse = _emitparse
+    macro._emitbuild = _emitbuild
+    macro._encoding = encoding
+    macro._length = length
     return macro
 
 
@@ -1803,8 +1836,24 @@ def PascalString(lengthfield, encoding):
 
     def _emitparse(code):
         return f"io.read({lengthfield._compileparse(code)}).decode({repr(encoding)})"
+    def _emitbuild(code):
+        fname = f"build_struct_{code.allocateId()}"
+        block = f"""
+            def {fname}(obj, io, this):
+                if obj=="":
+                    obj = 0
+                    {lengthfield._compilebuild(code)}
+                else:
+                    encodedObj = obj.encode('{encoding}')
+                    obj = len(encodedObj)
+                    {lengthfield._compilebuild(code)}
+                    io.write(encodedObj)
+        """
+        code.append(block)
+        return f"{fname}(obj, io, this)"
 
     macro._emitparse = _emitparse
+    macro._emitbuild = _emitbuild
 
     def _emitseq(ksy, bitwise):
         return [
@@ -1812,9 +1861,7 @@ def PascalString(lengthfield, encoding):
             dict(id="data", size="lengthfield", type="str", encoding=encoding),
         ]
     macro._emitseq = _emitseq
-
     return macro
-
 
 def CString(encoding):
     r"""
@@ -1839,6 +1886,27 @@ def CString(encoding):
     def _emitfulltype(ksy, bitwise):
         return dict(type="strz", encoding=encoding)
     macro._emitfulltype = _emitfulltype
+
+    def _emitparse(code):
+        if "def _read2zero(io, term):" not in code.toString():
+            code.append("""
+            def _read2zero(io, term):
+                def _worker(termlen):
+                    while True:
+                        item = io.read(termlen)
+                        if item != term:
+                            yield item
+                        else:
+                            break
+                return b"".join(_worker(len(term)))
+        """)
+        return f"_read2zero(io, {encodingunit(encoding)}).decode({repr(encoding)})"
+    
+    def _emitbuild(code):
+        return f"""io.write(obj.encode("{encoding}")+{encodingunit(encoding)}) if obj!="" else io.write({encodingunit(encoding)})"""
+
+    macro._emitparse = _emitparse
+    macro._emitbuild = _emitbuild
     return macro
 
 
@@ -1895,10 +1963,10 @@ class Flag(Construct):
         return 1
 
     def _emitparse(self, code):
-        return f"(io.read(1) != b'\\x00')"
+        return "(io.read(1) != b'\\x00')"
 
     def _emitbuild(self, code):
-        return f"((io.write(b'\\x01') if obj else io.write(b'\\x00')), obj)[1]"
+        return "((io.write(b'\\x01') if obj else io.write(b'\\x00')), obj)[1]"
 
     def _emitfulltype(self, ksy, bitwise):
         return dict(type=("b1" if bitwise else "u1"), _construct_render="Flag")
@@ -2185,6 +2253,58 @@ class Mapping(Adapter):
 #===============================================================================
 # structures and sequences
 #===============================================================================
+
+def __is_type__(sc, type):
+    while True:
+        if isinstance(sc, type):
+            return True
+        elif hasattr(sc, "subcon"):
+            sc = sc.subcon
+        else:
+            return False
+
+def __get_type__(sc, type, maxDepth=-1):
+    while maxDepth!=0:
+        maxDepth-=1
+        if isinstance(sc, type):
+            return sc
+        elif hasattr(sc, "subcon"):
+            sc = sc.subcon
+        else:
+            return None
+
+
+def reduceDependancyDepth(block, code):
+    argnames = passnames = ""
+    found = (item[1] for item in re.compile(r"(this(\['.*?'\])*)").findall(block))
+    for item in found:
+        if item.startswith("this['_']"):
+            argName = f"_argname_{code.allocateId()}"
+            block = block.replace(item, argName)
+            argnames  += ", " + argName
+            passnames += ", " + f"this{item[9:]}"
+    return block, (argnames, passnames)
+
+
+def materializeCollectedFixedSizeElements(currentStretchOfFixedLen, block, code, Name2LocalVar):
+    if currentStretchOfFixedLen.names: #There is at least one item to be parsed using a struct
+        structname = f"formatfield_{code.allocateId()}"
+        code.append(f"{structname} = struct.Struct({repr(currentStretchOfFixedLen.fmtstring)}) # {currentStretchOfFixedLen.length}\n")
+        _intermediate = f"""{", ".join(f"{Name2LocalVar[item]}" for item in currentStretchOfFixedLen.names)} = ({structname}.unpack(io.read({currentStretchOfFixedLen.length})))"""
+        return block + f"""
+                {_intermediate}
+                {currentStretchOfFixedLen.convertercmd}
+    """
+    return block
+
+@dataclass
+class _stretchOfFixedLen:
+    length: int
+    fmtstring: str
+    convertercmd: str
+    names: list[str]
+
+
 class Struct(Construct):
     r"""
     Sequence of usually named constructs, similar to structs in C. The members are parsed and build in the order they are defined. If a member is anonymous (its name is None) then it gets parsed and the value discarded, or it gets build from nothing (from None).
@@ -2303,77 +2423,79 @@ class Struct(Construct):
 
     def _emitparse(self, code):
         fname = f"parse_struct_{code.allocateId()}"
-        block = f"""
-            def {fname}(io, this):
-                result = dict()
-                this = dict(_ = this, _params = this['_params'], _root = None, _parsing = True, _building = False, _sizing = False, _subcons = None, _io = io, _index = this.get('_index', None))
-                this['_root'] = this['_'].get('_root', this)
-                try:
-        """
-
-        subcons = self.subcons.copy()
-
-        while subcons:
-            _names = []
-            _len = 0
-            _fmtstrings = ""
-            
-            while True:
-                try:
-                    sc = subcons.pop(0)
-                    if hasattr(sc, "subcon") and  hasattr(sc.subcon, "subcon") and isinstance(sc.subcon.subcon, Optional):
-                        raise Exception("optional element")
-
-                    fieldName = sc.name
-                    fieldLen = sc.length
-                    fieldFormatStr = sc.fmtstr
-                    if _fmtstrings and _fmtstrings[0] in {">", "<"}:
-                        if _fmtstrings[0] != _fmtstrings[0] and not (_fmtstrings[1] in {"B", "b"} and len(f) == 2):
-                            raise Exception()
-                        fieldFormatStr = fieldFormatStr[1:]
-                    _len = _len + fieldLen
-                    _fmtstrings = _fmtstrings+fieldFormatStr
-                    _names.append(fieldName)
-                    sc = None
-                except:                    
-                    if _names:
-                        structname = f"formatfield_{code.allocateId()}"
-                        code.append(f"{structname} = struct.Struct({repr(_fmtstrings)})\n")
-                        _intermediate = f"_intermediate = {structname}.unpack(io.read({_len}))"
-                        _results = "[" + ", ".join(f"result[{repr(item)}]" for item in _names) + f"] = _intermediate"
-                        _this = "[" + ", ".join(f"this[{repr(item)}]" for item in _names) + f"] = _intermediate" 
-                        block += f"""
-                    {_intermediate}
-                    {_results}
-                    {_this}
-                    """
-                    break      
-            if sc:
-                if hasattr(sc, "subcon") and  hasattr(sc.subcon, "subcon") and isinstance(sc.subcon.subcon, Optional):
+        localVars2NameDict = {f"__item_{idx}_": sc for idx, sc in enumerate(self.subcons)}
+        block = "".join(f"""{os.linesep}                {key}=None # {sc.name}""" for key, sc in 
+                        ((key, sc) for key, sc in localVars2NameDict.items() if ((__is_type__(sc, Optional) or __is_type__(sc, StopIf)) and sc.name)))
+        localVars2NameDict = {key: sc.name for key, sc in localVars2NameDict.items()}
+        Name2LocalVar = {name: localVar for localVar, name in localVars2NameDict.items()}
+        currentStretchOfFixedLen = _stretchOfFixedLen(length=0, fmtstring="", convertercmd="", names=[])
+        for sc in self.subcons:
+            if __is_type__(sc, StringEncoded) and hasattr(sc, "_encoding") and  hasattr(sc, "_length"): #its a padded string StringEncoded
+                currentStretchOfFixedLen.convertercmd += f"{Name2LocalVar[sc.name]} = {Name2LocalVar[sc.name]}.decode('{sc._encoding}').replace('\\x00', '');"
+                currentStretchOfFixedLen.fmtstring += f"{sc._length}s"
+                currentStretchOfFixedLen.length += sc._length
+                currentStretchOfFixedLen.names.append(sc.name)
+            elif hasattr(sc, "fmtstr") and  hasattr(sc, "_length"): #its a fixed length fmtstr entry
+                noByteOrderForSingleByteItems = {"<B":"B", ">B":"B", 
+                                                 "<b":"b", ">b":"b",
+                                                 "<x":"x", ">x":"x",
+                                                 "<c":"c", ">c":"c",}
+                fieldFormatStr = noByteOrderForSingleByteItems[sc.fmtstr] if sc.fmtstr in noByteOrderForSingleByteItems else sc.fmtstr
+                if currentStretchOfFixedLen.fmtstring == "":
+                    currentStretchOfFixedLen.fmtstring = fieldFormatStr
+                elif currentStretchOfFixedLen.fmtstring[0] in {">", "<"} and len (fieldFormatStr) >= 2 and currentStretchOfFixedLen.fmtstring[0] == fieldFormatStr[0]:
+                    # byte order already set, and matching
+                    currentStretchOfFixedLen.fmtstring = f"{currentStretchOfFixedLen.fmtstring}{fieldFormatStr[1]}"
+                elif currentStretchOfFixedLen.fmtstring[0] not in {">", "<"} and fieldFormatStr[0] in  {">", "<"} and len (fieldFormatStr) >= 2 :
+                    # byte order not already set
+                    currentStretchOfFixedLen.fmtstring = f"{fieldFormatStr[0]}{currentStretchOfFixedLen.fmtstring}{fieldFormatStr[1:]}"
+                elif fieldFormatStr[0] not in {">", "<"} and len (fieldFormatStr) > 0:
+                    # no byte order set on added struct
+                    currentStretchOfFixedLen.fmtstring = f"{currentStretchOfFixedLen.fmtstring}{fieldFormatStr}"
+                else:
+                    # change of byte order mid parsing... 
+                    block = materializeCollectedFixedSizeElements(currentStretchOfFixedLen, block, code, Name2LocalVar)
+                    currentStretchOfFixedLen = _stretchOfFixedLen(length=0, fmtstring=fieldFormatStr, convertercmd="", names=[])
+                currentStretchOfFixedLen.length += sc.length
+                currentStretchOfFixedLen.names.append(sc.name)
+            else: # a variable length item
+                block = materializeCollectedFixedSizeElements(currentStretchOfFixedLen, block, code, Name2LocalVar)
+                currentResult = "{"+ ", ".join(f"'{name}':{localVar}" for localVar, name  in  localVars2NameDict.items() if localVar in block)+ "}"
+                if __is_type__(sc, Optional):
+                    scOpt = __get_type__(sc, Optional)
                     block += f"""
-                    try:
-                        fallback = io.tell()
-                        {f'result[{repr(sc.name)}] = this[{repr(sc.name)}] = ' if sc.name else ''}{sc.subcon.subcon.subcons[0]._compileparse(code)}
-                    except StopFieldError:
-                        pass
-                    except ExplicitError:
-                        raise
-                    except Exception:
-                        {f'result[{repr(sc.name)}] = this[{repr(sc.name)}] = '}None 
-                        io.seek(fallback)
-                    """
+                try:
+                    fallback = io.tell()
+                    {f'{Name2LocalVar[sc.name]} = ' if sc.name else ''}{scOpt.subcons[0]._compileparse(code)}
+                except ExplicitError:
+                    raise
+                except Exception:
+                    if io.seek(0, io_SEEK_END) == fallback:
+                        return Container(__current_result__) #we are at the end of the stream....
+                    io.seek(fallback)"""
+                elif __get_type__(sc, StopIf, 2):
+                    block += f"""
+                {__get_type__(sc, StopIf)._compileparseNoRaise()} return Container(__current_result__) #stopif in struct"""
                 else:
                     block += f"""
-                    {f'result[{repr(sc.name)}] = this[{repr(sc.name)}] = ' if sc.name else ''}{sc._compileparse(code)}
-                    """
-
+                {f'{Name2LocalVar[sc.name]} = ' if sc.name else ''}{sc._compileparse(code)}"""
+                block = block.replace("__current_result__", currentResult)
+                currentStretchOfFixedLen = _stretchOfFixedLen(length=0, fmtstring="", convertercmd="", names=[])
+        block = materializeCollectedFixedSizeElements(currentStretchOfFixedLen, block, code, Name2LocalVar)
+        currentResult = "{"+ ", ".join(f"'{name}':{localVar}" for localVar, name  in localVars2NameDict.items() if (localVar in block) and name)+ "}"
         block += f"""
-                except StopFieldError:
-                    pass
-                return Container(result)
-        """
-        code.append(block)
-        return f"{fname}(io, this)"
+                return Container({currentResult})"""
+        for name, value in Name2LocalVar.items():
+            block = block.replace(f"this['{name}']", value)
+        block, (argnames, passnames) = reduceDependancyDepth(block, code)
+        if ("this" not in block):
+            code.append(f"""def {fname}(io{passnames}):""" + block)
+            return f"{fname}(io{argnames})"
+        if ("this" in block):
+            code.append(f"""def {fname}(io{passnames}, this):
+                this = Container(_ = Container(this), _params = this['_params'], _root = None, _parsing = True, _building = False, _sizing = False, _subcons = None, _io = io, _index = this.get('_index', None))
+                this['_root'] = this['_'].get('_root', this)""" + block)
+            return f"{fname}(io{argnames}, {{**this,**__current_result__}})"
 
     def _emitbuild(self, code):
         fname = f"build_struct_{code.allocateId()}"
@@ -2391,7 +2513,7 @@ class Struct(Construct):
                     {f'this[{repr(sc.name)}] = obj' if sc.name else ''}
                     {f'this[{repr(sc.name)}] = ' if sc.name else ''}{sc._compilebuild(code)}
             """
-        block += f"""
+        block += """
                     pass
                 except StopFieldError:
                     pass
@@ -2518,21 +2640,28 @@ class Sequence(Construct):
                 try:
         """
         for sc in self.subcons:
-            block += f"""
+            if isinstance(sc, StopIf):
+                redDictFiller = "{"+ ", ".join(f"'{name}':{localVar}" for localVar, name  in localVars2NameDict.items() if localVar in block)+ "}"
+                sif = sc._compileparseNoRaise()
+                block += f"""
+                {sif} return {redDictFiller}
+                """
+            else:
+                block += f"""
                     result.append({sc._compileparse(code)})
             """
             if sc.name:
                 block += f"""
                     this[{repr(sc.name)}] = result[-1]
                 """
-        block += f"""
+        block += """
                     pass
                 except StopFieldError:
                     pass
                 return result
         """
         code.append(block)
-        return f"{fname}(io, this)"
+        return f"{fname}(io, {{**this,**__current_result__}})"
 
     def _emitbuild(self, code):
         fname = f"build_sequence_{code.allocateId()}"
@@ -2546,13 +2675,13 @@ class Sequence(Construct):
         """
         for sc in self.subcons:
             block += f"""
-                    {f'obj = next(objiter)'}
+                    {'obj = next(objiter)'}
                     {f'this[{repr(sc.name)}] = obj' if sc.name else ''}
-                    {f'x = '}{sc._compilebuild(code)}
-                    {f'retlist.append(x)'}
+                    {'x = '}{sc._compilebuild(code)}
+                    {'retlist.append(x)'}
                     {f'this[{repr(sc.name)}] = x' if sc.name else ''}
             """
-        block += f"""
+        block += """
                     pass
                 except StopFieldError:
                     pass
@@ -2749,7 +2878,8 @@ class RepeatUntil(Subconstruct):
         predicate = self.predicate
         discard = self.discard
         if not callable(predicate):
-            predicate = lambda _1,_2,_3: predicate
+            def predicate(_1, _2, _3):
+                return predicate
         obj = ListContainer()
         for i in itertools.count():
             context._index = i
@@ -2763,7 +2893,8 @@ class RepeatUntil(Subconstruct):
         predicate = self.predicate
         discard = self.discard
         if not callable(predicate):
-            predicate = lambda _1,_2,_3: predicate
+            def predicate(_1, _2, _3):
+                return predicate
         partiallist = ListContainer()
         retlist = ListContainer()
         for i,e in enumerate(obj):
@@ -2794,7 +2925,7 @@ class RepeatUntil(Subconstruct):
                         return list_
         """
         code.append(block)
-        return f"{fname}(io, this)"
+        return f"{fname}(io, ({{**this,**__current_result__}}))"
 
     def _emitbuild(self, code):
         fname = f"build_repeatuntil_{code.allocateId()}"
@@ -2935,12 +3066,13 @@ class Const(Subconstruct):
         return self.subcon._sizeof(context, path)
 
     def _emitparse(self, code):
+        fun_name = f"parse_const_{code.allocateId()}"
         code.append(f"""
-            def parse_const(value, expected):
-                if not value == expected: raise ConstError
-                return value
+            def {fun_name}(value):
+                if not value == {repr(self.value)}: raise ConstError
+                return {repr(self.value)}
         """)
-        return f"parse_const({self.subcon._compileparse(code)}, {repr(self.value)})"
+        return f"{fun_name}({self.subcon._compileparse(code)})"
 
     def _emitbuild(self, code):
         if isinstance(self.value, bytes):
@@ -3193,14 +3325,14 @@ class Check(Construct):
         return 0
 
     def _emitparse(self, code):
-        code.append(f"""
+        code.append("""
             def parse_check(condition):
                 if not condition: raise CheckError
         """)
         return f"parse_check({repr(self.func)})"
 
     def _emitbuild(self, code):
-        code.append(f"""
+        code.append("""
             def build_check(condition):
                 if not condition: raise CheckError
         """)
@@ -3364,7 +3496,7 @@ class FocusedSeq(Construct):
                 return this[{repr(self.parsebuildfrom)}]
         """
         code.append(block)
-        return f"{fname}(io, this)"
+        return f"{fname}(io, {{**this,**__current_result__}})"
 
     def _emitbuild(self, code):
         fname = f"build_focusedseq_{code.allocateId()}"
@@ -3379,11 +3511,11 @@ class FocusedSeq(Construct):
         for sc in self.subcons:
             block += f"""
                     {f'obj = {"finalobj" if sc.name == self.parsebuildfrom else "None"}'}
-                    {f'buildret = '}{sc._compilebuild(code)}
+                    {'buildret = '}{sc._compilebuild(code)}
                     {f'this[{repr(sc.name)}] = buildret' if sc.name else ''}
                     {f'{"finalret = buildret" if sc.name == self.parsebuildfrom else ""}'}
             """
-        block += f"""
+        block += """
                     pass
                 except StopFieldError:
                     pass
@@ -3424,14 +3556,14 @@ class Pickled(Construct):
         return obj
 
     def _emitparse(self, code):
-        fname = "factory_%s" % code.allocateId()
+        "factory_%s" % code.allocateId()
         code.append("""
             import pickle
                     """)
         return "pickle.load(io)"
 
     def _emitbuild(self, code):
-        fname = "factory_%s" % code.allocateId()
+        "factory_%s" % code.allocateId()
         code.append("""
             import pickle
                     """)
@@ -3469,14 +3601,14 @@ class Numpy(Construct):
         return obj
 
     def _emitparse(self, code):
-        fname = "factory_%s" % code.allocateId()
+        "factory_%s" % code.allocateId()
         code.append("""
             import numpy
                     """)
         return "numpy.load(io)"
 
     def _emitbuild(self, code):
-        fname = "factory_%s" % code.allocateId()
+        "factory_%s" % code.allocateId()
         code.append("""
             import numpy
                     """)
@@ -3862,6 +3994,7 @@ class Union(Construct):
         fname = "parse_union_%s" % code.allocateId()
         block = """
             def %s(io, this):
+                #union
                 this = Container(_ = this, _params = this['_params'], _root = None, _parsing = True, _building = False, _sizing = False, _subcons = None, _io = io, _index = this.get('_index', None))
                 this['_root'] = this['_'].get('_root', this)
                 fallback = io.tell()
@@ -3906,7 +4039,7 @@ class Union(Construct):
                 return this
         """
         code.append(block)
-        return "%s(io, this)" % (fname,)
+        return f"{fname}(io, this)"
 
     def _emitbuild(self, code):
         fname = f"build_union_{code.allocateId()}"
@@ -3925,7 +4058,7 @@ class Union(Construct):
                     {f'buildret = this[{repr(sc.name)}] = ' if sc.name else ''}{sc._compilebuild(code)}
                     {f'return Container({{ {repr(sc.name)}:buildret }})'}
             """
-        block += f"""
+        block += """
                 raise UnionError('cannot build, none of subcons were found in the dictionary')
         """
         code.append(block)
@@ -3998,7 +4131,7 @@ class Select(Construct):
         for sc in self.subcons:
                 cb = sc._compileparse(code)
                 if cb == "None":
-                    block += f"""
+                    block += """
                 return None
                 """
                 else:
@@ -4142,7 +4275,7 @@ class IfThenElse(Construct):
         else:
             aid = code.allocateId()
             code.userfunction[aid] = self.condfunc
-            return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), f"userfunction[{aid}](Container(this))", self.elsesubcon._compileparse(code), )
+            return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), f"userfunction[{aid}](Container({{**this,**__current_result__}}))", self.elsesubcon._compileparse(code), )
 
     def _emitbuild(self, code):
         if isinstance(self.condfunc, ExprMixin) or (not callable(self.condfunc)):
@@ -4157,6 +4290,8 @@ class IfThenElse(Construct):
         dict(id="thenvalue", type=self.thensubcon._compileprimitivetype(ksy, bitwise), if_=repr(self.condfunc).replace("this.","")),
         dict(id="elsesubcon", type=self.elsesubcon._compileprimitivetype(ksy, bitwise), if_=repr(~self.condfunc).replace("this.","")),
         ]
+
+
 
 
 class Switch(Construct):
@@ -4218,33 +4353,42 @@ class Switch(Construct):
             raise SizeofError("cannot calculate size, key not found in context", path=path)
 
     def _emitparse(self, code):
-        fname = f"switch_cases_{code.allocateId()}"
-        code.append(f"{fname} = {{}}")
-        for key,sc in self.cases.items():
-            code.append(f"{fname}[{repr(key)}] = lambda io,this: {sc._compileparse(code)}")
-        defaultfname = f"switch_defaultcase_{code.allocateId()}"
-        code.append(f"{defaultfname} = lambda io,this: {self.default._compileparse(code)}")
+        def __make_switch_statement(cases, keyfun, default, code, assignWalrus=False):
+            aid = code.allocateId()
+            if cases:
+                newCond, newAction = cases.pop()
+                if assignWalrus: # use walrus operator to avoid multiple evaluation of check.
+                    nameOfkFun = f"switch_lookup_value_{aid}"
+                    return f"{newAction._emitparse(code)} if (({nameOfkFun} := ({keyfun})) == ({repr(newCond)})) else ({__make_switch_statement(cases, nameOfkFun, default, code, False)})"
+                return f"{newAction._emitparse(code)} if (({keyfun}) == ({repr(newCond)})) else ({__make_switch_statement(cases, keyfun, default, code, False)})"
+            else:
+                return f"{default}"
+                
         if isinstance(self.keyfunc, ExprMixin) or(not callable(self.keyfunc)):
-            return f"{fname}.get({repr(self.keyfunc)}, {defaultfname})(io, this)"
+            return __make_switch_statement(set(self.cases.items()), repr(self.keyfunc), self.default._compileparse(code), code, True)
         else:
             aid = code.allocateId()
             code.userfunction[aid] = self.keyfunc
-            return f"{fname}.get(userfunction[{aid}](Container(this)), {defaultfname})(io, this)"
+            return __make_switch_statement(set(self.cases.items()), f"userfunction[{aid}](Container(this))", self.default._compileparse(code), code, True)
 
     def _emitbuild(self, code):
-        fname = f"switch_cases_{code.allocateId()}"
-        code.append(f"{fname} = {{}}")
-        for key,sc in self.cases.items():
-            code.append(f"{fname}[{repr(key)}] = lambda obj,io,this: {sc._compilebuild(code)}")
-        defaultfname = f"switch_defaultcase_{code.allocateId()}"
-        code.append(f"{defaultfname} = lambda obj,io,this: {self.default._compilebuild(code)}")
+        def __make_switch_statement(cases, keyfun, default, code, assignWalrus=False):
+            aid = code.allocateId()
+            if cases:
+                newCond, newAction = cases.pop()
+                if assignWalrus: # use walrus operator to avoid multiple evaluation of check.
+                    nameOfkFun = f"switch_lookup_value_{aid}"
+                    return f"{newAction._emitbuild(code)} if (({nameOfkFun} := ({keyfun})) == ({repr(newCond)})) else ({__make_switch_statement(cases, nameOfkFun, default, code, False)})"
+                return f"{newAction._emitbuild(code)} if (({keyfun}) == ({repr(newCond)})) else ({__make_switch_statement(cases, keyfun, default, code, False)})"
+            else:
+                return f"{default}"
+                
         if isinstance(self.keyfunc, ExprMixin) or(not callable(self.keyfunc)):
-            return f"{fname}.get({repr(self.keyfunc)}, {defaultfname})(obj, io, this)"
+            return __make_switch_statement(set(self.cases.items()), repr(self.keyfunc), self.default._compilebuild(code), code, True)
         else:
             aid = code.allocateId()
             code.userfunction[aid] = self.keyfunc
-            return f"{fname}.get(userfunction[{aid}](Container(this)), {defaultfname})(obj, io, this)"
-
+            return __make_switch_statement(set(self.cases.items()), f"userfunction[{aid}](Container(this))", self.default._compilebuild(code), code, True)
 
 class StopIf(Construct):
     r"""
@@ -4283,16 +4427,14 @@ class StopIf(Construct):
     def _sizeof(self, context, path):
         raise SizeofError("StopIf cannot determine size because it depends on actual context which then depends on actual data and outer constructs", path=path)
 
+    def _compileparseNoRaise(self):
+        return f"if({repr(self.condfunc)}): "
+    
     def _emitparse(self, code):
-        code.append(f"""
-            def parse_stopif(condition):
-                if condition:
-                    raise StopFieldError
-        """)
-        return f"parse_stopif({repr(self.condfunc)})"
+        return f"if({repr(self.condfunc)}): return Container(__current_result__)"
 
     def _emitbuild(self, code):
-        code.append(f"""
+        code.append("""
             def build_stopif(condition):
                 if condition:
                     raise StopFieldError
@@ -4604,7 +4746,7 @@ class Pointer(Subconstruct):
         return 0
 
     def _emitparse(self, code):
-        code.append(f"""
+        code.append("""
             def parse_pointer(io, offset, func):
                 fallback = io.tell()
                 io.seek(offset, 2 if offset < 0 else 0)
@@ -4615,7 +4757,7 @@ class Pointer(Subconstruct):
         return f"parse_pointer(io, {self.offset}, lambda: {self.subcon._compileparse(code)})"
 
     def _emitbuild(self, code):
-        code.append(f"""
+        code.append("""
             def build_pointer(obj, io, offset, func):
                 fallback = io.tell()
                 io.seek(offset, 2 if offset < 0 else 0)
@@ -5492,7 +5634,7 @@ class Restreamed(Subconstruct):
 
     def _build(self, obj, stream, context, path):
         stream2 = RestreamedBytesIO(stream, self.decoder, self.decoderunit, self.encoder, self.encoderunit)
-        buildret = self.subcon._build(obj, stream2, context, path)
+        self.subcon._build(obj, stream2, context, path)
         stream2.close()
         return obj
 
@@ -5910,7 +6052,6 @@ class EncryptedSym(Tunnel):
    """
 
     def __init__(self, subcon, cipher):
-        import cryptography
         super().__init__(subcon)
         self.cipher = cipher
 
@@ -5920,7 +6061,7 @@ class EncryptedSym(Tunnel):
         if not isinstance(cipher, Cipher):
             raise CipherError(f"cipher {repr(cipher)} is not a cryptography.hazmat.primitives.ciphers.Cipher object", path=path)
         if isinstance(cipher.mode, modes.GCM):
-            raise CipherError(f"AEAD cipher is not supported in this class, use EncryptedSymAead", path=path)
+            raise CipherError("AEAD cipher is not supported in this class, use EncryptedSymAead", path=path)
         return cipher
 
     def _decode(self, data, context, path):
