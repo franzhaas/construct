@@ -641,6 +641,18 @@ def test_rebuild_issue_664():
     # no asserts are needed
     d.build(obj)
 
+
+def test_rebuild_custom_function():
+    def getlen(this):
+        return 2
+
+    template = Struct(      "count" / Rebuild(Byte, getlen), "my_items" / Byte[this.count])
+    for d  in [template, template.compile()]:
+        assert d.parse(b"\x02ab") == Container(count=2, my_items=[97,98])
+        assert d.build(dict(count=None,my_items=[255,255])) == b"\x02\xff\xff"
+        assert d.build(dict(count=2,my_items=[255,255])) == b"\x02\xff\xff"
+        assert d.build(dict(my_items=[255,255])) == b"\x02\xff\xff"
+
 def test_default():
     d = Default(Byte, 0)
     common(d, b"\xff", 255, 1)
