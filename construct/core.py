@@ -1841,7 +1841,9 @@ def PascalString(lengthfield, encoding):
     macro = StringEncoded(Prefixed(lengthfield, GreedyBytes), encoding)
 
     def _emitparse(code):
-        return f"io.read({lengthfield._compileparse(code)}).decode({repr(encoding)})"
+        # We use the walrus operator and a list to avoid a function call. If the buffer length doesnt match the 
+        # expected length, we make an out of index access, which is ok for this situation
+        return f"[lengthField:={lengthfield._compileparse(code)}, rBuf:=io.read(lengthField), rBuf.decode({repr(encoding)})][2+int(len(rBuf) != lengthField)]"
 
     def _emitbuild(code):
         fname = f"build_struct_{code.allocateId()}"
