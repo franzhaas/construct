@@ -592,8 +592,6 @@ class Construct(object):
         modulename = hexlify(hashlib.sha1(source.encode()).digest()).decode()
         module_spec = importlib.machinery.ModuleSpec(modulename, None)
         module = importlib.util.module_from_spec(module_spec)
-        with open("p.py", "w") as f:
-            f.write(source)
         c = compile(source, '', 'exec')
         exec(c, module.__dict__)
 
