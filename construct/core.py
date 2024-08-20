@@ -2282,7 +2282,7 @@ def __get_type__(sc, type, maxDepth=-1):
             return None
 
 
-def __reduceDependancyDepth__(block, code):
+def __reduceInderectionsIntoThis__(block, code):
     argnames = passnames = ""
     found = (item[1] for item in re.compile(r"(this(\['.*?'\])*)").findall(block))
     for item in found:
@@ -2294,18 +2294,18 @@ def __reduceDependancyDepth__(block, code):
     return block, (argnames, passnames)
 
 
-def __materializeCollectedFixedSizeElements__(currentStretchOfFixedLen, block, code, Name2LocalVar):
+def __materializeCollectedFixedSizeElements__(currentStretchOfFixedLen, block, code, name2sc):
     if currentStretchOfFixedLen.names: #There is at least one item to be parsed using a struct
         if all(item in {">", "<", "B"} for item in (currentStretchOfFixedLen.fmtstring)):
-            _intermediate = f"""({", ".join(f"{Name2LocalVar[item]}" for item in currentStretchOfFixedLen.names)}, ) = io.read({currentStretchOfFixedLen.length})"""
+            _intermediate = f"""({", ".join(f"{name2sc[item]}" for item in currentStretchOfFixedLen.names)}, ) = io.read({currentStretchOfFixedLen.length})"""
             return block + f"""
-                {_intermediate}
-                {currentStretchOfFixedLen.convertercmd}
+    {_intermediate}
+    {currentStretchOfFixedLen.convertercmd}
     """
         else:
             return block + f"""
-                ({", ".join(f"{Name2LocalVar[item]}" for item in currentStretchOfFixedLen.names)}, ) = {code.getCachedStruct(currentStretchOfFixedLen.fmtstring)}.unpack(io.read({currentStretchOfFixedLen.length}))
-                {currentStretchOfFixedLen.convertercmd}
+    ({", ".join(f"{name2sc[item]}" for item in currentStretchOfFixedLen.names)}, ) = {code.getCachedStruct(currentStretchOfFixedLen.fmtstring)}.unpack(io.read({currentStretchOfFixedLen.length}))
+    {currentStretchOfFixedLen.convertercmd}
     """
     return block
 
@@ -2456,26 +2456,25 @@ class Struct(Construct):
 
     def _emitparse(self, code):
         fname = f"parse_struct_{code.allocateId()}"
-        localVars2NameDict = {f"__item_{idx}_": sc for idx, sc in enumerate(self.subcons)}
-        block = "".join(f"""{os.linesep}                {key}=None # {sc.name}""" for key, sc in 
-                        ((key, sc) for key, sc in localVars2NameDict.items() if ((__is_type__(sc, Optional) or __is_type__(sc, StopIf)) and sc.name)))
-        localVars2NameDict = {sc.name: key  for key, sc in localVars2NameDict.items()}
-        Name2LocalVar = {name: localVar for name, localVar in localVars2NameDict.items()}
+        name2sc = {f"__item_{idx}_": sc for idx, sc in enumerate(self.subcons)}
+        block = "".join(f"""{os.linesep}    {key}=None # {sc.name}""" for key, sc in 
+                        ((key, sc) for key, sc in name2sc.items() if ((__is_type__(sc, Optional) or __is_type__(sc, StopIf)) and sc.name)))
+        name2sc = {sc.name: key  for key, sc in name2sc.items()}
         currentStretchOfFixedLen = _stretchOfFixedLen(length=0, fmtstring="", convertercmd="", names=[])
 
         for sc in self.subcons:
             if __is_type__(sc, StringEncoded) and hasattr(sc, "_encoding") and  hasattr(sc, "_length"): #its a padded string StringEncoded
-                currentStretchOfFixedLen.convertercmd += f"{Name2LocalVar[sc.name]} = {Name2LocalVar[sc.name]}.decode('{sc._encoding}').replace('\\x00', '');"
+                currentStretchOfFixedLen.convertercmd += f"{name2sc[sc.name]} = {name2sc[sc.name]}.decode('{sc._encoding}').replace('\\x00', '');"
                 currentStretchOfFixedLen.fmtstring += f"{sc._length}s"
                 currentStretchOfFixedLen.length += sc._length
                 currentStretchOfFixedLen.names.append(sc.name)
             elif __is_type__(sc, Const, 3):
                 name = sc.name
                 block += f"""
-                if {sc.subcon.subcon._compileparse(code)} != {sc.value}:
-                    raise ConstError()
+    if {sc.subcon.subcon._compileparse(code)} != {sc.value}:
+        raise ConstError()
                 """
-                localVars2NameDict[name] = repr(sc.value)
+                name2sc[name] = repr(sc.value)
                 
             elif __is_type__(sc, FormatField, 3) and hasattr(sc, "fmtstr"): #its a fixed length fmtstr entry
                 name = sc.name
@@ -2500,69 +2499,69 @@ class Struct(Construct):
                     currentStretchOfFixedLen.fmtstring = f"{currentStretchOfFixedLen.fmtstring}{fieldFormatStr}"
                 else:
                     # change of byte order mid parsing... 
-                    block = __materializeCollectedFixedSizeElements__(currentStretchOfFixedLen, block, code, Name2LocalVar)
+                    block = __materializeCollectedFixedSizeElements__(currentStretchOfFixedLen, block, code, name2sc)
                     currentStretchOfFixedLen = _stretchOfFixedLen(length=0, fmtstring=fieldFormatStr, convertercmd="", names=[])
                 currentStretchOfFixedLen.length += sc.length
                 currentStretchOfFixedLen.names.append(name)
             else: # a variable length item, or optional item
-                block = __materializeCollectedFixedSizeElements__(currentStretchOfFixedLen, block, code, Name2LocalVar)
-                currentResult = "{"+ ", ".join(f"'{name}':{localVar}" for name, localVar   in  localVars2NameDict.items() if localVar in block)+ "}"
+                block = __materializeCollectedFixedSizeElements__(currentStretchOfFixedLen, block, code, name2sc)
+                currentResult = "{"+ ", ".join(f"'{name}':{localVar}" for name, localVar   in  name2sc.items() if localVar in block)+ "}"
                 if __is_type__(sc, Optional):
                     block += f"""
-                try:
-                    fallback = io.tell()
-                    {f'{Name2LocalVar[sc.name]} = ' if sc.name else ''}{sc.subcons[0]._compileparse(code)}
-                except ExplicitError:
-                    raise
-                except Exception:
-                    if io.seek(0, io_SEEK_END) == fallback:
-                        return Container(__current_result__) #we are at the end of the stream....
-                    io.seek(fallback)"""
+    try:
+        fallback = io.tell()
+        {f'{name2sc[sc.name]} = ' if sc.name else ''}{sc.subcons[0]._compileparse(code)}
+    except ExplicitError:
+        raise
+    except Exception:
+        if io.seek(0, io_SEEK_END) == fallback:
+            return Container(__current_result__) #we are at the end of the stream....
+        io.seek(fallback)"""
                 elif __get_type__(sc, StopIf, 2):
                     block += f"""
-                {__get_type__(sc, StopIf)._compileparseNoRaise()} return Container(__current_result__) #stopif in struct"""
+    {__get_type__(sc, StopIf)._compileparseNoRaise()} return Container(__current_result__) #stopif in struct"""
                 else:
                     block += f"""
-                {f'{Name2LocalVar[sc.name]} = ' if sc.name else ''}{sc._compileparse(code)}"""
+    {f'{name2sc[sc.name]} = ' if sc.name else ''}{sc._compileparse(code)}"""
                 block = block.replace("__current_result__", currentResult)
                 currentStretchOfFixedLen = _stretchOfFixedLen(length=0, fmtstring="", convertercmd="", names=[])
-        block = __materializeCollectedFixedSizeElements__(currentStretchOfFixedLen, block, code, Name2LocalVar)
-        currentResult = "{"+ ", ".join(f"'{name}':{localVar}" for name, localVar   in localVars2NameDict.items() if (localVar in block) and name)+ "}"
+        block = __materializeCollectedFixedSizeElements__(currentStretchOfFixedLen, block, code, name2sc)
+        currentResult = "{"+ ", ".join(f"'{name}':{localVar}" for name, localVar   in name2sc.items() if (localVar in block) and name)+ "}"
         block += f"""
-                return Container({currentResult})"""
-        for name, value in Name2LocalVar.items():
+    return Container({currentResult})"""
+        for name, value in name2sc.items():
             block = block.replace(f"this['{name}']", value)
-        block, (argnames, passnames) = __reduceDependancyDepth__(block, code)
+        block, (argnames, passnames) = __reduceInderectionsIntoThis__(block, code)
         if ("this" not in block):
             code.append(f"""def {fname}(io{passnames}):""" + block)
             return f"{fname}(io{argnames})"
         if ("this" in block):
             code.append(f"""def {fname}(io{passnames}, this):
-                this = Container(_ = Container(this), _params = this['_params'], _root = None, _parsing = True, _building = False, _sizing = False, _subcons = None, _io = io, _index = this.get('_index', None))
-                this['_root'] = this['_'].get('_root', this)""" + block)
+    this = Container(_ = Container(this), _params = this['_params'], _root = None, _parsing = True, _building = False, _sizing = False, _subcons = None, _io = io, _index = this.get('_index', None))
+    this['_root'] = this['_'].get('_root', this)""" + block)
             return f"{fname}(io{argnames}, {{**this,**__current_result__}})"
 
     def _emitbuild(self, code):
         fname = f"build_struct_{code.allocateId()}"
         block = f"""
-            def {fname}(obj, io, this):
-                this = Container(_ = this, _params = this['_params'], _root = None, _parsing = False, _building = True, _sizing = False, _subcons = None, _io = io, _index = this.get('_index', None))
-                this['_root'] = this['_'].get('_root', this)
-                this.update(obj)
-                try:
-                    objdict = obj
+    def {fname}(obj, io, this):
+        this = Container(_ = this, _params = this['_params'], _root = None, _parsing = False, _building = True, _sizing = False, _subcons = None, _io = io, _index = this.get('_index', None))
+        this['_root'] = this['_'].get('_root', this)
+        this.update(obj)
+        try:
+            objdict = obj
         """
         for sc in self.subcons:
             block += f"""
-                    {f'obj = objdict.get({repr(sc.name)}, None)' if sc.flagbuildnone else f'obj = objdict[{repr(sc.name)}]'}
-                    {f'this[{repr(sc.name)}] = obj' if sc.name else ''}
-                    {f'this[{repr(sc.name)}] = ' if sc.name else ''}{sc._compilebuild(code)}
+            {f'obj = objdict.get({repr(sc.name)}, None)' if sc.flagbuildnone else f'obj = objdict[{repr(sc.name)}]'}
+            {f'this[{repr(sc.name)}] = obj' if sc.name else ''}
+            {f'this[{repr(sc.name)}] = ' if sc.name else ''}{sc._compilebuild(code)}
             """
         block += """
-                    pass
-                except StopFieldError:
-                    pass
-                return this
+            pass
+        except StopFieldError:
+           pass
+        return this
         """
         code.append(block)
         return f"{fname}(obj, io, this)"
@@ -2677,32 +2676,32 @@ class Sequence(Construct):
     def _emitparse(self, code):
         fname = f"parse_sequence_{code.allocateId()}"
         block = f"""
-            def {fname}(io, this):
-                result = ListContainer()
-                this = Container(_ = this, _params = this['_params'], _root = None, _parsing = True, _building = False, _sizing = False, _subcons = None, _io = io, _index = this.get('_index', None))
-                this['_root'] = this['_'].get('_root', this)
-                try:
+def {fname}(io, this):
+    result = ListContainer()
+    this = Container(_ = this, _params = this['_params'], _root = None, _parsing = True, _building = False, _sizing = False, _subcons = None, _io = io, _index = this.get('_index', None))
+    this['_root'] = this['_'].get('_root', this)
+    try:
         """
         for sc in self.subcons:
             if isinstance(sc, StopIf):
                 redDictFiller = "{"+ ", ".join(f"'{name}':{localVar}" for localVar, name  in localVars2NameDict.items() if localVar in block)+ "}"
                 sif = sc._compileparseNoRaise()
                 block += f"""
-                {sif} return {redDictFiller}
+        {sif} return {redDictFiller}
                 """
             else:
                 block += f"""
-                    result.append({sc._compileparse(code)})
+        result.append({sc._compileparse(code)})
             """
             if sc.name:
                 block += f"""
-                    this[{repr(sc.name)}] = result[-1]
+        this[{repr(sc.name)}] = result[-1]
                 """
         block += """
-                    pass
-                except StopFieldError:
-                    pass
-                return result
+        pass
+    except StopFieldError:
+        pass
+    return result
         """
         code.append(block)
         return f"{fname}(io, {{**this,**__current_result__}})"
