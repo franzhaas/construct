@@ -2459,8 +2459,8 @@ class Struct(Construct):
         localVars2NameDict = {f"__item_{idx}_": sc for idx, sc in enumerate(self.subcons)}
         block = "".join(f"""{os.linesep}                {key}=None # {sc.name}""" for key, sc in 
                         ((key, sc) for key, sc in localVars2NameDict.items() if ((__is_type__(sc, Optional) or __is_type__(sc, StopIf)) and sc.name)))
-        localVars2NameDict = {key: sc.name for key, sc in localVars2NameDict.items()}
-        Name2LocalVar = {name: localVar for localVar, name in localVars2NameDict.items()}
+        localVars2NameDict = {sc.name: key  for key, sc in localVars2NameDict.items()}
+        Name2LocalVar = {name: localVar for name, localVar in localVars2NameDict.items()}
         currentStretchOfFixedLen = _stretchOfFixedLen(length=0, fmtstring="", convertercmd="", names=[])
 
         for sc in self.subcons:
@@ -2475,11 +2475,8 @@ class Struct(Construct):
                 if {sc.subcon.subcon._compileparse(code)} != {sc.value}:
                     raise ConstError()
                 """
-                localVars2NameDictTemp = {a: b for b, a in localVars2NameDict.items()}
-                localVars2NameDictTemp[name] = repr(sc.value)
-                localVars2NameDict = {a: b for b, a in localVars2NameDictTemp.items()}
-
-
+                localVars2NameDict[name] = repr(sc.value)
+                
             elif __is_type__(sc, FormatField, 3) and hasattr(sc, "fmtstr"): #its a fixed length fmtstr entry
                 name = sc.name
                 noByteOrderForSingleByteItems = {"<B":"B", ">B":"B", 
@@ -2509,7 +2506,7 @@ class Struct(Construct):
                 currentStretchOfFixedLen.names.append(name)
             else: # a variable length item, or optional item
                 block = __materializeCollectedFixedSizeElements__(currentStretchOfFixedLen, block, code, Name2LocalVar)
-                currentResult = "{"+ ", ".join(f"'{name}':{localVar}" for localVar, name  in  localVars2NameDict.items() if localVar in block)+ "}"
+                currentResult = "{"+ ", ".join(f"'{name}':{localVar}" for name, localVar   in  localVars2NameDict.items() if localVar in block)+ "}"
                 if __is_type__(sc, Optional):
                     block += f"""
                 try:
@@ -2530,7 +2527,7 @@ class Struct(Construct):
                 block = block.replace("__current_result__", currentResult)
                 currentStretchOfFixedLen = _stretchOfFixedLen(length=0, fmtstring="", convertercmd="", names=[])
         block = __materializeCollectedFixedSizeElements__(currentStretchOfFixedLen, block, code, Name2LocalVar)
-        currentResult = "{"+ ", ".join(f"'{name}':{localVar}" for localVar, name  in localVars2NameDict.items() if (localVar in block) and name)+ "}"
+        currentResult = "{"+ ", ".join(f"'{name}':{localVar}" for name, localVar   in localVars2NameDict.items() if (localVar in block) and name)+ "}"
         block += f"""
                 return Container({currentResult})"""
         for name, value in Name2LocalVar.items():
