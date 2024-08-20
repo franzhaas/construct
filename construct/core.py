@@ -2327,7 +2327,6 @@ class _stretchOfFixedLen:
     convertercmd: str
     names: list
 
-
 class Struct(Construct):
     r"""
     Sequence of usually named constructs, similar to structs in C. The members are parsed and build in the order they are defined. If a member is anonymous (its name is None) then it gets parsed and the value discarded, or it gets build from nothing (from None).
@@ -2470,6 +2469,17 @@ class Struct(Construct):
                 currentStretchOfFixedLen.fmtstring += f"{sc._length}s"
                 currentStretchOfFixedLen.length += sc._length
                 currentStretchOfFixedLen.names.append(sc.name)
+            elif __is_type__(sc, Const, 3):
+                name = sc.name
+                block += f"""
+                if {sc.subcon.subcon._compileparse(code)} != {sc.value}:
+                    raise ConstError()
+                """
+                localVars2NameDictTemp = {a: b for b, a in localVars2NameDict.items()}
+                localVars2NameDictTemp[name] = repr(sc.value)
+                localVars2NameDict = {a: b for b, a in localVars2NameDictTemp.items()}
+
+
             elif __is_type__(sc, FormatField, 3) and hasattr(sc, "fmtstr"): #its a fixed length fmtstr entry
                 name = sc.name
                 noByteOrderForSingleByteItems = {"<B":"B", ">B":"B", 
@@ -2562,7 +2572,6 @@ class Struct(Construct):
 
     def _emitseq(self, ksy, bitwise):
         return [sc._compilefulltype(ksy, bitwise) for sc in self.subcons]
-
 
 class Sequence(Construct):
     r"""
