@@ -536,7 +536,7 @@ class Construct(object):
     def _actualsize(self, stream, context, path):
         return self._sizeof(context, path)
 
-    def compile(self, filename=None, containertype="Container"):
+    def compile(self, filename=None, containertype="Container", ListContainerType="ListContainer"):
         """
         Transforms a construct into another construct that does same thing (has same parsing and building semantics) but is much faster when parsing. Already compiled instances just compile into itself.
 
@@ -574,6 +574,7 @@ class Construct(object):
             max_ = max
             abs_ = abs
             Container = {containertype}
+            ListContainer = list
         """)
         code.append(f"""
             def parseall(io, this):
