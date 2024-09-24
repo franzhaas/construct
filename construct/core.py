@@ -21,6 +21,14 @@ from dataclasses import dataclass
 import os
 
 
+def _emit_function_expression_or_const(code, func, parameters):
+    if isinstance(func, ExprMixin) or (not callable(func)):
+        return repr(func)
+    else:
+        aid = code.allocateId()
+        code.userfunction[aid] = func
+        return f"userfunction[{aid}]({parameters})"
+
 #===============================================================================
 # exceptions
 #===============================================================================
@@ -1013,12 +1021,7 @@ class Bytes(Construct):
             raise SizeofError("cannot calculate size, key not found in context", path=path)
 
     def _emitparse(self, code):
-        if isinstance(self.length, ExprMixin) or (not callable(self.length)):
-            return f"io.read({self.length})"
-        else:
-            aid = code.allocateId()
-            code.userfunction[aid] = self.length
-            return f"io.read(userfunction[{aid}]({{**this,**__current_result__}}))"
+        return f"""io.read({_emit_function_expression_or_const(code, self.length, "{**this,**__current_result__}")})"""
 
     def _emitbuild(self, code):
         return "(io.write(obj), obj)[1]"
@@ -3176,20 +3179,12 @@ class Computed(Construct):
         return 0
 
     def _emitparse(self, code):
-        if isinstance(self.func, ExprMixin) or (not callable(self.func)):
-            return repr(self.func)
-        else:
-            aid = code.allocateId()
-            code.userfunction[aid] = self.func
-            return f"userfunction[{aid}](Container(this))"
+        return _emit_function_expression_or_const(code, self.func, "Container(this)")
 
-    def _emitbuild(self, code):
-        if isinstance(self.func, ExprMixin) or (not callable(self.func)):
-            return repr(self.func)
-        else:
-            aid = code.allocateId()
-            code.userfunction[aid] = self.func
-            return f"userfunction[{aid}](Container(this))"
+    # Usage in the class
+    def emitbuild(self, code):
+        return _emit_function_expression_or_const(code, self.func, "Container(this)")
+
 
 
 @singleton
@@ -3272,12 +3267,8 @@ class Rebuild(Subconstruct):
         return self.subcon._compileparse(code)
 
     def _emitbuild(self, code):
-        if isinstance(self.func, ExprMixin) or (not callable(self.func)):
-            return f"reuse({repr(self.func)}, lambda obj: ({self.subcon._compilebuild(code)}))"
-        else:
-            aid = code.allocateId()
-            code.userfunction[aid] = self.func
-            return f"reuse(userfunction[{aid}](Container(this)), lambda obj: ({self.subcon._compilebuild(code)}))"
+        return f"""reuse({_emit_function_expression_or_const(code, self.func, "Container(this)")}, lambda obj: ({self.subcon._compilebuild(code)}))"""
+        
 
     def _emitseq(self, ksy, bitwise):
         return self.subcon._compileseq(ksy, bitwise)
@@ -4332,12 +4323,7 @@ class IfThenElse(Construct):
         return sc._sizeof(context, path)
 
     def _emitparse(self, code):
-        if isinstance(self.condfunc, ExprMixin) or (not callable(self.condfunc)):
-            return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), self.condfunc, self.elsesubcon._compileparse(code), )
-        else:
-            aid = code.allocateId()
-            code.userfunction[aid] = self.condfunc
-            return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), f"userfunction[{aid}](Container({{**this,**__current_result__}}))", self.elsesubcon._compileparse(code), )
+        return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), _emit_function_expression_or_const(code, self.condfunc, "Container({**this,**__current_result__})"), self.elsesubcon._compileparse(code), )
     
     def _emitbuild(self, code):
         if isinstance(self.condfunc, ExprMixin) or (not callable(self.condfunc)):
