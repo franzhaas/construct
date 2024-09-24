@@ -1900,7 +1900,7 @@ def CString(encoding):
     """
     macro = StringEncoded(NullTerminated(GreedyBytes, term=encodingunit(encoding)), encoding)
     def _emitfulltype(ksy, bitwise):
-        return dict(type="strz", encoding=encoding)
+        return dict(type="str", encoding=encoding)
     macro._emitfulltype = _emitfulltype
 
     def _emitparse(code):
