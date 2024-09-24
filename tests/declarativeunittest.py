@@ -41,7 +41,7 @@ def common(format, datasample, objsample, sizesample=SizeofError, dontcompile=Fa
     # and implies: format.parse(data) == cformat.parse(data)
     # and implies: format.build(obj) == cformat.build(obj)
     if not dontcompile:
-        cformat = format.compile(filename="/tmp/construct_test_compile.py")
+        cformat = format.compile()
         obj = cformat.parse(datasample, **kw)
         assert obj == objsample, f"{obj} != {objsample}"
         data = cformat.build(objsample, **kw)

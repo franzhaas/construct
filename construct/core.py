@@ -2477,7 +2477,7 @@ class Struct(Construct):
                 currentStretchOfFixedLen.fmtstring += f"{sc._length}s"
                 currentStretchOfFixedLen.length += sc._length
                 currentStretchOfFixedLen.names.append(sc.name)
-            elif __is_type__(sc, Const, 3):
+            elif __is_type__(sc, Const, 2):
                 name = sc.name
                 block += f"""
     if {sc.subcon._compileparse(code)} != {sc.value}:
