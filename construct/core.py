@@ -3373,14 +3373,24 @@ class Check(Construct):
             def parse_check(condition):
                 if not condition: raise CheckError
         """)
-        return f"parse_check({repr(self.func)})"
+        if isinstance(self.func, ExprMixin) or (not callable(self.func)):
+            return f"parse_check({repr(self.func)})"
+        else:
+            aid = code.allocateId()
+            code.userfunction[aid] = self.func
+            return f"""parse_check(f"userfunction[{aid}](Container({{__current_result__}}))")"""
 
     def _emitbuild(self, code):
         code.append("""
             def build_check(condition):
                 if not condition: raise CheckError
         """)
-        return f"build_check({repr(self.func)})"
+        if isinstance(self.func, ExprMixin) or (not callable(self.func)):
+            return f"build_check({repr(self.func)})"
+        else:
+            aid = code.allocateId()
+            code.userfunction[aid] = self.func
+            return f"""build_check(f"userfunction[{aid}](Container({{__current_result__}}))")"""
 
 
 @singleton
