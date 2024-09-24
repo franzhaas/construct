@@ -2013,7 +2013,7 @@ class EnumIntegerString(str):
     def __eq__(self, other):
         if isinstance(other, int):
             return (self.intvalue == other)
-        elif type(other) == type(self):
+        elif isinstance(other, type(self)):
             return (self.intvalue == other.intvalue)
         elif isinstance(other, str):
             logging.warning("Using a str to compare with a enum value is depricated! this may lead to bugs in the future!")
@@ -3372,24 +3372,16 @@ class Check(Construct):
             def parse_check(condition):
                 if not condition: raise CheckError
         """)
-        if isinstance(self.func, ExprMixin) or (not callable(self.func)):
-            return f"parse_check({repr(self.func)})"
-        else:
-            aid = code.allocateId()
-            code.userfunction[aid] = self.func
-            return f"""parse_check(f"userfunction[{aid}](Container({{__current_result__}}))")"""
+        parsecheckproperty = _emit_function_expression_or_const(code, self.func, "Container(__current_result__)")
+        return f"parse_check({parsecheckproperty})"
 
     def _emitbuild(self, code):
         code.append("""
             def build_check(condition):
                 if not condition: raise CheckError
         """)
-        if isinstance(self.func, ExprMixin) or (not callable(self.func)):
-            return f"build_check({repr(self.func)})"
-        else:
-            aid = code.allocateId()
-            code.userfunction[aid] = self.func
-            return f"""build_check(f"userfunction[{aid}](Container({{__current_result__}}))")"""
+        bulidcheckproperty = _emit_function_expression_or_const(code, self.func, "Container({**this,**__current_result__})")
+        return f"build_check({bulidcheckproperty})"
 
 
 @singleton
@@ -4326,12 +4318,8 @@ class IfThenElse(Construct):
         return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), _emit_function_expression_or_const(code, self.condfunc, "Container({**this,**__current_result__})"), self.elsesubcon._compileparse(code), )
     
     def _emitbuild(self, code):
-        if isinstance(self.condfunc, ExprMixin) or (not callable(self.condfunc)):
-            return f"(({self.thensubcon._compilebuild(code)}) if ({repr(self.condfunc)}) else ({self.elsesubcon._compilebuild(code)}))"
-        else:
-            aid = code.allocateId()
-            code.userfunction[aid] = self.condfunc
-            return f"(({self.thensubcon._compilebuild(code)}) if (userfunction[{aid}](Container(this))) else ({self.elsesubcon._compilebuild(code)}))" 
+        condStr = _emit_function_expression_or_const(code, self.condfunc, "Container(this)")
+        return f"(({self.thensubcon._compilebuild(code)}) if ({condStr}) else ({self.elsesubcon._compilebuild(code)}))"
 
     def _emitseq(self, ksy, bitwise):
         return [
@@ -4412,12 +4400,7 @@ class Switch(Construct):
             else:
                 return f"{default}"
                 
-        if isinstance(self.keyfunc, ExprMixin) or(not callable(self.keyfunc)):
-            return __make_switch_statement(set(self.cases.items()), repr(self.keyfunc), self.default._compileparse(code), code, True)
-        else:
-            aid = code.allocateId()
-            code.userfunction[aid] = self.keyfunc
-            return __make_switch_statement(set(self.cases.items()), f"userfunction[{aid}](Container(this))", self.default._compileparse(code), code, True)
+        return __make_switch_statement(set(self.cases.items()), _emit_function_expression_or_const(code, self.keyfunc, "Container(this)"), self.default._compileparse(code), code, True)
 
     def _emitbuild(self, code):
         def __make_switch_statement(cases, keyfun, default, code, assignWalrus=False):
@@ -4431,12 +4414,8 @@ class Switch(Construct):
             else:
                 return f"{default}"
                 
-        if isinstance(self.keyfunc, ExprMixin) or(not callable(self.keyfunc)):
-            return __make_switch_statement(set(self.cases.items()), repr(self.keyfunc), self.default._compilebuild(code), code, True)
-        else:
-            aid = code.allocateId()
-            code.userfunction[aid] = self.keyfunc
-            return __make_switch_statement(set(self.cases.items()), f"userfunction[{aid}](Container(this))", self.default._compilebuild(code), code, True)
+        return __make_switch_statement(set(self.cases.items()), _emit_function_expression_or_const(code, self.keyfunc, "Container(this)"), self.default._compilebuild(code), code, True)
+
 
 class StopIf(Construct):
     r"""
@@ -4809,12 +4788,8 @@ class Pointer(Subconstruct):
                 io.seek(fallback)
                 return obj
         """)
-        if isinstance(self.offset, ExprMixin) or (not callable(self.offset)):
-            return f"parse_pointer(io, {self.offset}, lambda: {self.subcon._compileparse(code)})"
-        else:
-            aid = code.allocateId()
-            code.userfunction[aid] = self.offset
-            return f"parse_pointer(io, userfunction[{aid}]({{**this,**__current_result__}}), lambda: {self.subcon._compileparse(code)})"
+        property = _emit_function_expression_or_const(code, self.offset, "{**this,**__current_result__}")
+        return f"parse_pointer(io, {property}, lambda: {self.subcon._compileparse(code)})"
 
     def _emitbuild(self, code):
         code.append("""
@@ -4825,12 +4800,8 @@ class Pointer(Subconstruct):
                 io.seek(fallback)
                 return ret
         """)
-        if isinstance(self.offset, ExprMixin) or (not callable(self.offset)):
-            return f"build_pointer(obj, io, {self.offset}, lambda: {self.subcon._compilebuild(code)})"
-        else:
-            aid = code.allocateId()
-            code.userfunction[aid] = self.offset
-            return f"build_pointer(obj, io, userfunction[{aid}]({{**this,**__current_result__}}), lambda: {self.subcon._compilebuild(code)})"
+        property = _emit_function_expression_or_const(code, self.offset, "{**this,**__current_result__}")
+        return f"build_pointer(obj, io, {property}, lambda: {self.subcon._compilebuild(code)})"
 
     def _emitprimitivetype(self, ksy, bitwise):
         offset = self.offset.__getfield__() if callable(self.offset) else self.offset
