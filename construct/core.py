@@ -1013,7 +1013,12 @@ class Bytes(Construct):
             raise SizeofError("cannot calculate size, key not found in context", path=path)
 
     def _emitparse(self, code):
-        return f"io.read({self.length})"
+        if isinstance(self.length, ExprMixin) or (not callable(self.length)):
+            return f"io.read({self.length})"
+        else:
+            aid = code.allocateId()
+            code.userfunction[aid] = self.length
+            return f"io.read(userfunction[{aid}]({{**this,**__current_result__}}))"
 
     def _emitbuild(self, code):
         return "(io.write(obj), obj)[1]"
@@ -2248,14 +2253,14 @@ class Mapping(Adapter):
             raise MappingError("building failed, no encoding mapping for %r" % (obj,), path=path)
 
     def _emitparse(self, code):
-        fname = f"factory_{code.allocateId()}"
-        code.append(f"{fname} = {repr(self.decmapping)}")
-        return f"{fname}[{self.subcon._compileparse(code)}]"
+        aid = code.allocateId()
+        code.userfunction[aid] = self.decmapping
+        return f"userfunction[{aid}][{self.subcon._compileparse(code)}]"
 
     def _emitbuild(self, code):
-        fname = f"factory_{code.allocateId()}"
-        code.append(f"{fname} = {repr(self.encmapping)}")
-        return f"reuse({fname}[obj], lambda obj: ({self.subcon._compilebuild(code)}))"
+        aid = code.allocateId()
+        code.userfunction[aid] = self.encmapping
+        return f"reuse(userfunction[{aid}][obj], lambda obj: ({self.subcon._compilebuild(code)}))"
 
 
 #===============================================================================
@@ -2472,7 +2477,7 @@ class Struct(Construct):
             elif __is_type__(sc, Const, 3):
                 name = sc.name
                 block += f"""
-    if {sc.subcon.subcon._compileparse(code)} != {sc.value}:
+    if {sc.subcon._compileparse(code)} != {sc.value}:
         raise ConstError()
                 """
                 name2sc[name] = repr(sc.value)
@@ -2684,14 +2689,7 @@ def {fname}(io, this):
     try:
         """
         for sc in self.subcons:
-            if isinstance(sc, StopIf):
-                redDictFiller = "{"+ ", ".join(f"'{name}':{localVar}" for localVar, name  in localVars2NameDict.items() if localVar in block)+ "}"
-                sif = sc._compileparseNoRaise()
-                block += f"""
-        {sif} return {redDictFiller}
-                """
-            else:
-                block += f"""
+            block += f"""
         result.append({sc._compileparse(code)})
             """
             if sc.name:
@@ -3178,10 +3176,20 @@ class Computed(Construct):
         return 0
 
     def _emitparse(self, code):
-        return repr(self.func)
+        if isinstance(self.func, ExprMixin) or (not callable(self.func)):
+            return repr(self.func)
+        else:
+            aid = code.allocateId()
+            code.userfunction[aid] = self.func
+            return f"userfunction[{aid}](Container(this))"
 
     def _emitbuild(self, code):
-        return repr(self.func)
+        if isinstance(self.func, ExprMixin) or (not callable(self.func)):
+            return repr(self.func)
+        else:
+            aid = code.allocateId()
+            code.userfunction[aid] = self.func
+            return f"userfunction[{aid}](Container(this))"
 
 
 @singleton
@@ -4485,13 +4493,20 @@ class StopIf(Construct):
         return f"if({repr(self.condfunc)}): "
     
     def _emitparse(self, code):
-        return f"if({repr(self.condfunc)}): return Container(__current_result__)"
+        code.append("""
+            def emit_stopif(condition):
+                if condition:
+                    raise StopFieldError
+                return None
+        """)
+        return f"emit_stopif({repr(self.condfunc)})"
 
     def _emitbuild(self, code):
         code.append("""
             def build_stopif(condition):
                 if condition:
                     raise StopFieldError
+                return None
         """)
         return f"build_stopif({repr(self.condfunc)})"
 
@@ -4808,7 +4823,12 @@ class Pointer(Subconstruct):
                 io.seek(fallback)
                 return obj
         """)
-        return f"parse_pointer(io, {self.offset}, lambda: {self.subcon._compileparse(code)})"
+        if isinstance(self.offset, ExprMixin) or (not callable(self.offset)):
+            return f"parse_pointer(io, {self.offset}, lambda: {self.subcon._compileparse(code)})"
+        else:
+            aid = code.allocateId()
+            code.userfunction[aid] = self.offset
+            return f"parse_pointer(io, userfunction[{aid}]({{**this,**__current_result__}}), lambda: {self.subcon._compileparse(code)})"
 
     def _emitbuild(self, code):
         code.append("""
@@ -4819,7 +4839,12 @@ class Pointer(Subconstruct):
                 io.seek(fallback)
                 return ret
         """)
-        return f"build_pointer(obj, io, {self.offset}, lambda: {self.subcon._compilebuild(code)})"
+        if isinstance(self.offset, ExprMixin) or (not callable(self.offset)):
+            return f"build_pointer(obj, io, {self.offset}, lambda: {self.subcon._compilebuild(code)})"
+        else:
+            aid = code.allocateId()
+            code.userfunction[aid] = self.offset
+            return f"build_pointer(obj, io, userfunction[{aid}]({{**this,**__current_result__}}), lambda: {self.subcon._compilebuild(code)})"
 
     def _emitprimitivetype(self, ksy, bitwise):
         offset = self.offset.__getfield__() if callable(self.offset) else self.offset
