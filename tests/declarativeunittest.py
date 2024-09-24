@@ -20,7 +20,7 @@ def raises(func, *args, **kw):
     except Exception as e:
         return e.__class__
 
-def common(format, datasample, objsample, sizesample=SizeofError, **kw):
+def common(format, datasample, objsample, sizesample=SizeofError, dontcompile=False, **kw):
     # following are implied (re-parse and re-build)
     # assert format.parse(format.build(obj)) == obj
     # assert format.build(format.parse(data)) == data
@@ -40,11 +40,12 @@ def common(format, datasample, objsample, sizesample=SizeofError, **kw):
     # following was added to test compiling functionality
     # and implies: format.parse(data) == cformat.parse(data)
     # and implies: format.build(obj) == cformat.build(obj)
-    cformat = format.compile()
-    obj = cformat.parse(datasample, **kw)
-    assert obj == objsample
-    data = cformat.build(objsample, **kw)
-    assert data == datasample
+    if not dontcompile:
+        cformat = format.compile(filename="/tmp/construct_test_compile.py")
+        obj = cformat.parse(datasample, **kw)
+        assert obj == objsample, f"{obj} != {objsample}"
+        data = cformat.build(objsample, **kw)
+        assert data == datasample
 
 def commonhex(format, hexdata):
     commonbytes(format, binascii.unhexlify(hexdata))
