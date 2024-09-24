@@ -3987,10 +3987,21 @@ class IfThenElse(Construct):
         return sc._sizeof(context, path)
 
     def _emitparse(self, code):
-        return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), self.condfunc, self.elsesubcon._compileparse(code), )
+        if isinstance(self.condfunc, ExprMixin) or (not callable(self.condfunc)):
+            return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), self.condfunc, self.elsesubcon._compileparse(code), )
+        else:
+            aid = code.allocateId()
+            code.userfunction[aid] = self.condfunc
+            return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), f"userfunction[{aid}](this)", self.elsesubcon._compileparse(code))
+
 
     def _emitbuild(self, code):
-        return f"(({self.thensubcon._compilebuild(code)}) if ({repr(self.condfunc)}) else ({self.elsesubcon._compilebuild(code)}))"
+        if isinstance(self.condfunc, ExprMixin) or (not callable(self.condfunc)):
+            return f"(({self.thensubcon._compilebuild(code)}) if ({repr(self.condfunc)}) else ({self.elsesubcon._compilebuild(code)}))"
+        else:
+            aid = code.allocateId()
+            code.userfunction[aid] = self.condfunc
+            return f"(({self.thensubcon._compilebuild(code)}) if (userfunction[{aid}](this)) else ({self.elsesubcon._compilebuild(code)}))" 
 
     def _emitseq(self, ksy, bitwise):
         return [
@@ -4058,22 +4069,38 @@ class Switch(Construct):
             raise SizeofError("cannot calculate size, key not found in context", path=path)
 
     def _emitparse(self, code):
-        fname = f"switch_cases_{code.allocateId()}"
-        code.append(f"{fname} = {{}}")
-        for key,sc in self.cases.items():
-            code.append(f"{fname}[{repr(key)}] = lambda io,this: {sc._compileparse(code)}")
-        defaultfname = f"switch_defaultcase_{code.allocateId()}"
-        code.append(f"{defaultfname} = lambda io,this: {self.default._compileparse(code)}")
-        return f"{fname}.get({repr(self.keyfunc)}, {defaultfname})(io, this)"
+        def __make_switch_statement(cases, keyfun, default, code):
+            aid = code.allocateId()
+            if cases:
+                newCond, newAction = cases.pop()
+                nameOfkFun = f"switch_lookup_value_{aid}"
+                return f"{newAction._emitparse(code)} if (({nameOfkFun} := ({keyfun})) == ({repr(newCond)})) else ({__make_switch_statement(cases, nameOfkFun, default, code)})"
+            else:
+                return f"{default}"
+
+        if isinstance(self.keyfunc, ExprMixin) or(not callable(self.keyfunc)):
+            return __make_switch_statement(set(self.cases.items()), repr(self.keyfunc), self.default._compileparse(code), code)
+        else:
+            aid = code.allocateId()
+            code.userfunction[aid] = self.keyfunc
+            return __make_switch_statement(set(self.cases.items()), f"userfunction[{aid}](Container(this))", self.default._compileparse(code), code)
 
     def _emitbuild(self, code):
-        fname = f"switch_cases_{code.allocateId()}"
-        code.append(f"{fname} = {{}}")
-        for key,sc in self.cases.items():
-            code.append(f"{fname}[{repr(key)}] = lambda obj,io,this: {sc._compilebuild(code)}")
-        defaultfname = f"switch_defaultcase_{code.allocateId()}"
-        code.append(f"{defaultfname} = lambda obj,io,this: {self.default._compilebuild(code)}")
-        return f"{fname}.get({repr(self.keyfunc)}, {defaultfname})(obj, io, this)"
+        def __make_switch_statement(cases, keyfun, default, code):
+            aid = code.allocateId()
+            if cases:
+                newCond, newAction = cases.pop()
+                nameOfkFun = f"switch_lookup_value_{aid}"
+                return f"{newAction._emitbuild(code)} if (({nameOfkFun} := ({keyfun})) == ({repr(newCond)})) else ({__make_switch_statement(cases, nameOfkFun, default, code)})"
+            else:
+                return f"{default}"
+
+        if isinstance(self.keyfunc, ExprMixin) or(not callable(self.keyfunc)):
+            return __make_switch_statement(set(self.cases.items()), repr(self.keyfunc), self.default._compilebuild(code), code)
+        else:
+            aid = code.allocateId()
+            code.userfunction[aid] = self.keyfunc
+            return __make_switch_statement(set(self.cases.items()), f"userfunction[{aid}](Container(this))", self.default._compilebuild(code), code, True)
 
 
 class StopIf(Construct):
