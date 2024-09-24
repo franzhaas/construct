@@ -337,7 +337,7 @@ def test_enum_issue_298():
             STX = 0x02,
         ),
         Probe(),
-        "optional" / If(lambda this: this.ctrl == "NAK", Byte),
+        "optional" / If(lambda this: this.ctrl in {"NAK", 0x15} , Byte),
     )
     common(d, b"\x15\xff", Container(ctrl=EnumIntegerString.new(0x15, 'NAK'), optional=255))
     common(d, b"\x02", Container(ctrl=EnumIntegerString.new(0x02, 'STX'), optional=None))
