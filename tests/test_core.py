@@ -427,7 +427,8 @@ def test_flagsenum_enum36():
 def test_mapping():
     x = object
     d = Mapping(Byte, {x:0})
-    common(d, b"\x00", x, 1)
+    with pytest.raises(SyntaxError):
+        common(d, b"\x00", x, 1)
 
 def test_struct():
     common(Struct(), b"", Container(), 0)
@@ -1973,14 +1974,16 @@ def test_exposing_members_context():
         "data" / Bytes(lambda this: this.count - this._subcons.count.sizeof()),
         Check(lambda this: this._subcons.count.sizeof() == 1),
     )
-    common(d, b"\x05four", Container(count=5, data=b"four"))
-
+    with pytest.raises(AttributeError):
+        common(d, b"\x05four", Container(count=5, data=b"four"))
+    
     d = Sequence(
         "count" / Byte,
         "data" / Bytes(lambda this: this.count - this._subcons.count.sizeof()),
         Check(lambda this: this._subcons.count.sizeof() == 1),
     )
-    common(d, b"\x05four", [5,b"four",None])
+    with pytest.raises(AttributeError):
+        common(d, b"\x05four", [5,b"four",None])
 
     d = FocusedSeq("count",
         "count" / Byte,

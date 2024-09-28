@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import struct, io, binascii, itertools, collections, pickle, sys, os, hashlib, importlib, importlib.machinery, importlib.util
+import logging
 
 from construct.lib import *
 from construct.expr import *
@@ -21,6 +22,13 @@ class ConstructError(Exception):
         else:
             message = "Error in path {}\n".format(path) + message
             super().__init__(message)
+
+class CompilerLimitation(ConstructError):
+    """
+    Used to mark a acceptable compile fail..
+    """
+    pass
+
 class SizeofError(ConstructError):
     """
     Parsing classes sizeof() methods are only allowed to either return an integer or raise SizeofError instead. Note that this exception can mean the parsing class cannot be measured apriori in principle, however it can also mean that it just cannot be measured in these particular circumstances (eg. there is a key missing in the context dictionary at this time).
@@ -1916,6 +1924,18 @@ class EnumIntegerString(str):
         ret.intvalue = intvalue
         return ret
 
+    def __eq__(self, other):
+        if isinstance(other, int):
+            return (self.intvalue == other)
+        elif isinstance(other, type(self)):
+            return (self.intvalue == other.intvalue)
+        elif isinstance(other, str):
+            logging.warning("Using a str to compare with a enum value is depricated! this may lead to bugs in the future!")
+            return str(self) == other
+        raise NotImplementedError(f"Cont compare {type(self)} to {type(other)} {other}")
+
+    def __hash__(self):
+        return str(self).__hash__()
 
 class Enum(Adapter):
     r"""

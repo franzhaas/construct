@@ -1,4 +1,5 @@
 import pytest
+from construct.core import SizeofError, CompilerLimitation
 
 xfail = pytest.mark.xfail
 skip = pytest.mark.skip
@@ -25,7 +26,7 @@ def common(format, datasample, objsample, sizesample=SizeofError, **kw):
     # assert format.parse(format.build(obj)) == obj
     # assert format.build(format.parse(data)) == data
     obj = format.parse(datasample, **kw)
-    assert obj == objsample
+    assert obj == objsample, f"expected {objsample} != {obj}, parsing from {datasample}"
     data = format.build(objsample, **kw)
     assert data == datasample
 
@@ -36,19 +37,14 @@ def common(format, datasample, objsample, sizesample=SizeofError, **kw):
         size = raises(format.sizeof, **kw)
         assert size == sizesample
 
-    # attemps to compile, ignores if compilation fails
-    # following was added to test compiling functionality
-    # and implies: format.parse(data) == cformat.parse(data)
-    # and implies: format.build(obj) == cformat.build(obj)
     try:
-        cformat = format.compile()
-    except Exception:
-        pass
-    else:
-        obj = cformat.parse(datasample, **kw)
-        assert obj == objsample
-        data = cformat.build(objsample, **kw)
-        assert data == datasample
+        cformat = format.compile(filename="cformat.py")
+    except CompilerLimitation:
+        return
+    obj = cformat.parse(datasample, **kw)
+    assert obj == objsample, f"expected {objsample} != {obj}, parsing from {datasample}"
+    data = cformat.build(objsample, **kw)
+    assert data == datasample, f"expected {datasample} != {data}, building from {objsample}"
 
 def commonhex(format, hexdata):
     commonbytes(format, binascii.unhexlify(hexdata))
