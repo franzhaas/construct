@@ -7,6 +7,14 @@ from construct.expr import *
 from construct.version import *
 
 
+def _emit_function_expression_or_const(code, func, parameters="this"):
+    if isinstance(func, ExprMixin) or (not callable(func)):
+        return repr(func)
+    else:
+        aid = code.allocateId()
+        code.userfunction[aid] = func
+        return f"userfunction[{aid}]({parameters})"
+
 #===============================================================================
 # exceptions
 #===============================================================================
@@ -980,7 +988,7 @@ class Bytes(Construct):
             raise SizeofError("cannot calculate size, key not found in context", path=path)
 
     def _emitparse(self, code):
-        return f"io.read({self.length})"
+        return f"io.read({_emit_function_expression_or_const(code, self.length)})"
 
     def _emitbuild(self, code):
         return f"(io.write(obj), obj)[1]"
@@ -2924,10 +2932,10 @@ class Computed(Construct):
         return 0
 
     def _emitparse(self, code):
-        return repr(self.func)
+        return _emit_function_expression_or_const(code, self.func)
 
     def _emitbuild(self, code):
-        return repr(self.func)
+        return _emit_function_expression_or_const(code, self.func)
 
 
 @singleton
@@ -3119,14 +3127,14 @@ class Check(Construct):
             def parse_check(condition):
                 if not condition: raise CheckError
         """)
-        return f"parse_check({repr(self.func)})"
+        return f"parse_check({_emit_function_expression_or_const(code, self.func)})"
 
     def _emitbuild(self, code):
         code.append(f"""
             def build_check(condition):
                 if not condition: raise CheckError
         """)
-        return f"build_check({repr(self.func)})"
+        return f"build_check({_emit_function_expression_or_const(code, self.func)})"
 
 
 @singleton
@@ -3987,10 +3995,10 @@ class IfThenElse(Construct):
         return sc._sizeof(context, path)
 
     def _emitparse(self, code):
-        return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), self.condfunc, self.elsesubcon._compileparse(code), )
+        return "((%s) if (%s) else (%s))" % (self.thensubcon._compileparse(code), _emit_function_expression_or_const(code, self.condfunc), self.elsesubcon._compileparse(code), )
 
     def _emitbuild(self, code):
-        return f"(({self.thensubcon._compilebuild(code)}) if ({repr(self.condfunc)}) else ({self.elsesubcon._compilebuild(code)}))"
+        return f"(({self.thensubcon._compilebuild(code)}) if ({_emit_function_expression_or_const(code, self.condfunc)}) else ({self.elsesubcon._compilebuild(code)}))"
 
     def _emitseq(self, ksy, bitwise):
         return [
@@ -4249,10 +4257,16 @@ class Padded(Subconstruct):
             raise SizeofError("cannot calculate size, key not found in context", path=path)
 
     def _emitparse(self, code):
-        return f"({self.subcon._compileparse(code)}, io.read(({self.length})-({self.subcon.sizeof()}) ))[0]"
+        if isinstance(self.length, int):
+            return f"({self.subcon._compileparse(code)}, io.read(({self.length})-({self.subcon.sizeof()}) ))[0]"
+        else:
+            raise CompilerLimitation("Padding needs to know all sizes at compile time")
 
     def _emitbuild(self, code):
-        return f"({self.subcon._compilebuild(code)}, io.write({repr(self.pattern)}*(({self.length})-({self.subcon.sizeof()})) ))[0]"
+        if isinstance(self.length, int):
+            return f"({self.subcon._compilebuild(code)}, io.write({repr(self.pattern)}*(({self.length})-({self.subcon.sizeof()})) ))[0]"
+        else:
+            raise CompilerLimitation("Padding needs to know all sizes at compile time")
 
     def _emitfulltype(self, ksy, bitwise):
         return dict(size=self.length, type=self.subcon._compileprimitivetype(ksy, bitwise))
@@ -4442,7 +4456,7 @@ class Pointer(Subconstruct):
                 io.seek(fallback)
                 return obj
         """)
-        return f"parse_pointer(io, {self.offset}, lambda: {self.subcon._compileparse(code)})"
+        return f"parse_pointer(io, {_emit_function_expression_or_const(code, self.offset)}, lambda: {self.subcon._compileparse(code)})"
 
     def _emitbuild(self, code):
         code.append(f"""
@@ -4453,7 +4467,7 @@ class Pointer(Subconstruct):
                 io.seek(fallback)
                 return ret
         """)
-        return f"build_pointer(obj, io, {self.offset}, lambda: {self.subcon._compilebuild(code)})"
+        return f"build_pointer(obj, io, {_emit_function_expression_or_const(code, self.offset)}, lambda: {self.subcon._compilebuild(code)})"
 
     def _emitprimitivetype(self, ksy, bitwise):
         offset = self.offset.__getfield__() if callable(self.offset) else self.offset
