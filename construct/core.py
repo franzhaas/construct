@@ -4345,10 +4345,16 @@ class Aligned(Subconstruct):
             raise SizeofError("cannot calculate size, key not found in context", path=path)
 
     def _emitparse(self, code):
-        return f"({self.subcon._compileparse(code)}, io.read(-({self.subcon.sizeof()}) % ({self.modulus}) ))[0]"
+        try:
+            return f"({self.subcon._compileparse(code)}, io.read(-({self.subcon.sizeof()}) % ({self.modulus}) ))[0]"
+        except SizeofError:
+            raise CompilerLimitation("Aligned needs to know all sizes at compile time")
 
     def _emitbuild(self, code):
-        return f"({self.subcon._compilebuild(code)}, io.write({repr(self.pattern)}*(-({self.subcon.sizeof()}) % ({self.modulus}))) )[0]"
+        try:
+            return f"({self.subcon._compilebuild(code)}, io.write({repr(self.pattern)}*(-({self.subcon.sizeof()}) % ({self.modulus}))) )[0]"
+        except SizeofError:
+            raise CompilerLimitation("Aligned needs to know all sizes at compile time")
 
 
 def AlignedStruct(modulus, *subcons, **subconskw):
