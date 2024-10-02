@@ -2633,6 +2633,42 @@ class GreedyRange(Subconstruct):
     def _emitfulltype(self, ksy, bitwise):
         return dict(type=self.subcon._compileprimitivetype(ksy, bitwise), repeat="eos")
 
+    def _emitparse(self, code):
+        fname = f"parse_greadyrange_{code.allocateId()}"
+        block = f"""
+            def {fname}(io, this):
+                list_ = ListContainer()
+                while True:
+                    fallback = io.tell()
+                    try:
+                        obj_ = {self.subcon._compileparse(code)}
+                        if not ({self.discard}):
+                            list_.append(obj_)
+                    except StopFieldError:
+                        return list_
+                    except ExplicitError:
+                        raise
+                    except Exception:
+                        io.seek(fallback)
+                        return list_
+        """
+        code.append(block)
+        return f"{fname}(io, this)"
+    
+    def _emitbuild(self, code):
+        fname = f"build_greadyrange_{code.allocateId()}"
+        block = f"""
+            def {fname}(obj, io, this):
+                objiter = iter(obj)
+                list_ = ListContainer()
+                for item in objiter :
+                    obj_ = reuse(item, lambda obj: {self.subcon._compilebuild(code)})
+                    list_.append(obj_)
+                return list_
+        """
+        code.append(block)
+        return f"{fname}(obj, io, this)"
+
 
 class RepeatUntil(Subconstruct):
     r"""
