@@ -1827,7 +1827,29 @@ def CString(encoding):
         >>> d.parse(_)
         u'Афон'
     """
+
+    def _emitparse(code):
+        if "def _read2zero(io, term):" not in code.toString():
+            code.append("""
+            def _read2zero(io, term):
+                def _worker(termlen):
+                    while True:
+                        item = io.read(termlen)
+                        if item != term:
+                            yield item
+                        else:
+                            break
+                return b"".join(_worker(len(term)))
+        """)
+        return f"_read2zero(io, {encodingunit(encoding)}).decode({repr(encoding)})"
+
+    def _emitbuild(code):
+        return f"""io.write(obj.encode("{encoding}")+{encodingunit(encoding)}) if obj!="" else io.write({encodingunit(encoding)})"""
+
     macro = StringEncoded(NullTerminated(GreedyBytes, term=encodingunit(encoding)), encoding)
+    macro._emitparse = _emitparse
+    macro._emitbuild = _emitbuild
+
     def _emitfulltype(ksy, bitwise):
         return dict(type="strz", encoding=encoding)
     macro._emitfulltype = _emitfulltype
