@@ -1769,8 +1769,20 @@ def PaddedString(length, encoding):
         u'Афон'
     """
     macro = StringEncoded(FixedSized(length, NullStripped(GreedyBytes, pad=encodingunit(encoding))), encoding)
+
+    def _emitparse(code):
+        return f"io.read({length}).decode('{encoding}').replace('\\x00', '')"
+
+    def _emitbuild(code):
+        return f"(io.write(b'\\00'*{length} if obj == '' else obj.ljust({length}, '\\00').encode('{encoding}')[:{length}]))"
+
+    macro._emitparse = _emitparse
+    macro._emitbuild = _emitbuild
+    macro._encoding = encoding
+    macro._length = length
+
     def _emitfulltype(ksy, bitwise):
-        return dict(size=length, type="strz", encoding=encoding)
+        return dict(size=length, type="str", encoding=encoding)
     macro._emitfulltype = _emitfulltype
     return macro
 
