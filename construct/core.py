@@ -5261,6 +5261,27 @@ class Transformed(Subconstruct):
         data = self.decodefunc(data)
         return self.subcon._parsereport(io.BytesIO(data), context, path)
 
+    def _emitparse(self, code):
+        decodeamount =  ""
+        if isinstance(self.decodeamount, int):
+            decodeamount = int(self.decodeamount)
+
+        aid = code.allocateId()
+        decFunc = {bytes2bits: "bytes2bits",
+                   bits2bytes: "bits2bytes",
+                   swapbytes: "swapbytes",
+                   swapbitsinbytes: "swapbitsinbytes"}[self.decodefunc]
+
+        code.append(f"""
+            from construct.lib.binary import bytes2bits, bits2bytes
+            from io import BytesIO
+            def Transforming_{aid}(ioOrig, this):
+                data = ioOrig.read({decodeamount})
+                io = BytesIO({decFunc}(data))
+                return {self.subcon._emitparse(code)}
+            """)
+        return f"Transforming_{aid}(io, this)"
+
     def _build(self, obj, stream, context, path):
         stream2 = io.BytesIO()
         buildret = self.subcon._build(obj, stream2, context, path)
@@ -5271,6 +5292,24 @@ class Transformed(Subconstruct):
                 raise StreamError("encoding transformation produced wrong amount of bytes, %s instead of expected %s" % (len(data), self.encodeamount, ), path=path)
         stream_write(stream, data, len(data), path)
         return buildret
+
+    def _emitbuild(self, code):
+        aid = code.allocateId()
+        encFunc = {bytes2bits: "bytes2bits",
+                   bits2bytes: "bits2bytes",
+                   swapbytes: "swapbytes",
+                   swapbitsinbytes: "swapbitsinbytes"}[self.encodefunc]
+
+        code.append(f"""
+            from construct.lib.binary import bytes2bits, bits2bytes
+            from io import BytesIO
+            def TransformingBuild_{aid}(obj, this, io_):
+                io = BytesIO()
+                {self.subcon._emitbuild(code)}
+                io_.write({encFunc}(io.getvalue()))
+                return obj
+            """)
+        return f"TransformingBuild_{aid}(obj, this, io)"
 
     def _sizeof(self, context, path):
         if self.decodeamount is None or self.encodeamount is None:
