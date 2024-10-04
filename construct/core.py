@@ -2666,13 +2666,19 @@ class GreedyRange(Subconstruct):
         block = f"""
             def {fname}(io, this):
                 list_ = ListContainer()
-                while True:
-                    try:
+                try:
+                    while True:
+                        fallback = io.tell()
                         obj_ = {self.subcon._compileparse(code)}
                         if not ({self.discard}):
                             list_.append(obj_)
-                    except (struct.error, StreamError) as e:
-                        return list_
+                except StopFieldError:
+                    pass
+                except ExplicitError:
+                    raise
+                except Exception:
+                    io.seek(fallback)
+                return list_
         """
         code.append(block)
         return f"{fname}(io, this)"
