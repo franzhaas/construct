@@ -5245,6 +5245,10 @@ class Transformed(Subconstruct):
         >>> d.parse(b"\x00\x00")
         b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
     """
+    converters = {bytes2bits: "bytes2bits",
+                  bits2bytes: "bits2bytes",
+                  swapbytes: "swapbytes",
+                  swapbitsinbytes: "swapbitsinbytes"}
 
     def __init__(self, subcon, decodefunc, decodeamount, encodefunc, encodeamount):
         super().__init__(subcon)
@@ -5267,10 +5271,7 @@ class Transformed(Subconstruct):
             decodeamount = int(self.decodeamount)
 
         aid = code.allocateId()
-        decFunc = {bytes2bits: "bytes2bits",
-                   bits2bytes: "bits2bytes",
-                   swapbytes: "swapbytes",
-                   swapbitsinbytes: "swapbitsinbytes"}[self.decodefunc]
+        decFunc = self.converters[self.decodefunc]
 
         code.append(f"""
             from construct.lib.binary import bytes2bits, bits2bytes
@@ -5295,10 +5296,7 @@ class Transformed(Subconstruct):
 
     def _emitbuild(self, code):
         aid = code.allocateId()
-        encFunc = {bytes2bits: "bytes2bits",
-                   bits2bytes: "bits2bytes",
-                   swapbytes: "swapbytes",
-                   swapbitsinbytes: "swapbitsinbytes"}[self.encodefunc]
+        encFunc = self.converters[self.encodefunc]
 
         code.append(f"""
             from construct.lib.binary import bytes2bits, bits2bytes
