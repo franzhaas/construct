@@ -5280,6 +5280,11 @@ class Transformed(Subconstruct):
         raise SizeofError(path=path)
 
 
+def _get_callStringOfMethod(code, fun):
+    aid = code.allocateId()
+    code.userfunction[aid] = fun
+    return f"userfunction[{aid}]"
+
 class Restreamed(Subconstruct):
     r"""
     Transforms bytes between the underlying stream and the (variable-sized) subcon.
@@ -5306,6 +5311,11 @@ class Restreamed(Subconstruct):
         Bytewise <--> Restreamed(subcon, bytes2bits, 1, bits2bytes, 8, lambda n: n*8)
     """
 
+    converters = {bytes2bits: "bytes2bits",
+                  bits2bytes: "bits2bytes",
+                  swapbytes: "swapbytes",
+                  swapbitsinbytes: "swapbitsinbytes"}
+
     def __init__(self, subcon, decoder, decoderunit, encoder, encoderunit, sizecomputer):
         super().__init__(subcon)
         self.decoder = decoder
@@ -5331,6 +5341,36 @@ class Restreamed(Subconstruct):
             raise SizeofError("Restreamed cannot calculate size without a sizecomputer", path=path)
         else:
             return self.sizecomputer(self.subcon._sizeof(context, path))
+
+    def _emitparse(self, code):
+        decoder = self.converters.get(self.decoder, _get_callStringOfMethod(code, self.decoder))
+        encoder = self.converters.get(self.encoder, _get_callStringOfMethod(code, self.encoder))
+        aid = code.allocateId()
+
+        code.append(f"""
+            from construct.lib.binary import bytes2bits, bits2bytes
+            from io import BytesIO
+            def Restreamed_{aid}(ioOrig, this):
+                io = RestreamedBytesIO(ioOrig, {decoder}, {self.decoderunit}, {encoder}, {self.encoderunit})
+                return {self.subcon._emitparse(code)}
+            """)
+        return f"Restreamed_{aid}(io, this)"
+
+    def _emitbuild(self, code):
+        decoder = self.converters.get(self.decoder, _get_callStringOfMethod(code, self.decoder))
+        encoder = self.converters.get(self.encoder, _get_callStringOfMethod(code, self.encoder))
+        aid = code.allocateId()
+
+        code.append(f"""
+            from construct.lib.binary import bytes2bits, bits2bytes
+            from io import BytesIO
+            def RestreamedBuild_{aid}(obj, this, ioOrig):
+                io = RestreamedBytesIO(ioOrig, {decoder}, {self.decoderunit}, {encoder}, {self.encoderunit})
+                {self.subcon._emitbuild(code)}
+                io.close()
+                return obj
+            """)
+        return f"RestreamedBuild_{aid}(obj, this, io)"
 
 
 class ProcessXor(Subconstruct):
