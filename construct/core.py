@@ -1734,14 +1734,10 @@ class StringEncoded(Adapter):
             raise StringError(f"cannot use encoding {self.encoding!r} to encode {obj!r}")
 
     def _emitparse(self, code):
-        raise NotImplementedError
-        # Not sure what the correct implementation would be.
-        # return f"({self.subcon._compileparse(code)}).decode({repr(self.encoding)})"
+        return f"({self.subcon._compileparse(code)}).decode({repr(self.encoding)})"
 
     def _emitbuild(self, code):
-        raise NotImplementedError
-        # This is not a valid implementation. obj.encode() should be inserted into subcon
-        # return f"({self.subcon._compilebuild(code)}).encode({repr(self.encoding)})"
+        return f"io.write([obj.encode({repr(self.encoding)}), b''][len(obj) == 0])"
 
 
 def PaddedString(length, encoding):
