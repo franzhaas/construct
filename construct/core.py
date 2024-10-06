@@ -833,6 +833,25 @@ class Adapter(Subconstruct):
     def _encode(self, obj, context, path):
         raise NotImplementedError
 
+    def _emitbuild(self, code):
+        aid = code.allocateId()
+        code.append(f"""
+        def adapter_{aid}(obj, io):
+            obj = {self._emitencode(code)}
+            return {self.subcon._compilebuild(code)}
+""")
+        return f"adapter_{aid}(obj, io)"
+
+    def _emitparse(self, code):
+        aid = code.allocateId()
+        code.append(f"""
+        def adapter_{aid}(io):
+            obj = {self.subcon._compileparse(code)}
+            obj = {self._emitdecode(code)}
+            return obj
+""")
+        return f"adapter_{aid}(io)"
+
 
 class SymmetricAdapter(Adapter):
     r"""
@@ -983,7 +1002,7 @@ class Bytes(Construct):
         return f"io.read({self.length})"
 
     def _emitbuild(self, code):
-        return f"(io.write(obj), obj)[1]"
+        return f"[io.write(obj), obj][1]"
 
     def _emitfulltype(self, ksy, bitwise):
         return dict(size=self.length)
@@ -1733,15 +1752,11 @@ class StringEncoded(Adapter):
         except:
             raise StringError(f"cannot use encoding {self.encoding!r} to encode {obj!r}")
 
-    def _emitparse(self, code):
-        raise NotImplementedError
-        # Not sure what the correct implementation would be.
-        # return f"({self.subcon._compileparse(code)}).decode({repr(self.encoding)})"
+    def _emitencode(self, code):
+        return f"obj.encode({repr(self.encoding)}) if len(obj) > 0 else b''"
 
-    def _emitbuild(self, code):
-        raise NotImplementedError
-        # This is not a valid implementation. obj.encode() should be inserted into subcon
-        # return f"({self.subcon._compilebuild(code)}).encode({repr(self.encoding)})"
+    def _emitdecode(self, code):
+        return f"obj.decode({repr(self.encoding)})"
 
 
 def PaddedString(length, encoding):
@@ -2107,6 +2122,12 @@ class FlagsEnum(Adapter):
             name = self.reverseflags.get(value, "unknown_%s" % i)
             seq.append(dict(id=name, type="b1", doc=hex(value), _construct_render="Flag"))
         return seq
+
+    def _emitdecode(self, code):
+        raise NotImplementedError
+
+    def _emitencode(self, code):
+        raise NotImplementedError
 
 
 class Mapping(Adapter):
@@ -3445,6 +3466,12 @@ class NamedTuple(Adapter):
     def _emitfulltype(self, ksy, bitwise):
         return self.subcon._compilefulltype(ksy, bitwise)
 
+    def _emitdecode(self, code):
+        raise NotImplementedError
+
+    def _emitencode(self, code):
+        raise NotImplementedError
+
 
 class TimestampAdapter(Adapter):
     """Used internally."""
@@ -3499,6 +3526,10 @@ def Timestamp(subcon, unit, epoch):
             def _encode(self, obj, context, path):
                 t = obj.timetuple()
                 return Container(year=t.tm_year-1980, month=t.tm_mon, day=t.tm_mday, hour=t.tm_hour, minute=t.tm_min, second=t.tm_sec//2)
+            def _emitdecode(self, code):
+                raise NotImplementedError
+            def _emitencode(self, code):
+                raise NotImplementedError
         macro = MsdosTimestampAdapter(st)
 
     else:
@@ -3509,6 +3540,10 @@ def Timestamp(subcon, unit, epoch):
                 return epoch.shift(seconds=obj*unit)
             def _encode(self, obj, context, path):
                 return int((obj-epoch).total_seconds()/unit)
+            def _emitdecode(self, code):
+                raise NotImplementedError
+            def _emitencode(self, code):
+                raise NotImplementedError
         macro = EpochTimestampAdapter(subcon)
 
     def _emitfulltype(ksy, bitwise):
@@ -3579,6 +3614,12 @@ class Hex(Adapter):
     def _emitfulltype(self, ksy, bitwise):
         return self.subcon._compilefulltype(ksy, bitwise)
 
+    def _emitdecode(self, code):
+        raise NotImplementedError
+
+    def _emitencode(self, code):
+        raise NotImplementedError
+
 
 class HexDump(Adapter):
     r"""
@@ -3633,6 +3674,12 @@ class HexDump(Adapter):
 
     def _emitfulltype(self, ksy, bitwise):
         return self.subcon._compilefulltype(ksy, bitwise)
+
+    def _emitdecode(self, code):
+        raise NotImplementedError
+
+    def _emitencode(self, code):
+        raise NotImplementedError
 
 
 #===============================================================================
@@ -5097,6 +5144,32 @@ class NullTerminated(Subconstruct):
         if len(self.term) > 1:
             raise NotImplementedError
         return dict(terminator=byte2int(self.term), include=self.include, consume=self.consume, eos_error=self.require, **self.subcon._compilefulltype(ksy, bitwise))
+
+    def _emitbuild(self, code):
+        aid = code.allocateId()
+        code.append(f"""
+        def NullTerminated_{aid}(obj, io):
+            obj = {self.subcon._compilebuild(code)}
+            io.write({self.term})
+            return obj
+        """)
+        return f"NullTerminated_{aid}(obj, io)"
+
+    def _emitparse(self, code):
+        aid = code.allocateId()
+        code.append(f"""
+        from io import BytesIO
+        def NullTerminated_{aid}(io):
+            def _collect(io):
+                while True:
+                    elem = io.read({len(self.term)})
+                    if elem == {self.term}:
+                        break
+                    yield elem
+            io = BytesIO(b"".join(_collect(io)))
+            return {self.subcon._compileparse(code)}
+        """)
+        return f"NullTerminated_{aid}(io)"
 
 
 class NullStripped(Subconstruct):
