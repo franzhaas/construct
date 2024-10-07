@@ -5086,6 +5086,21 @@ class FixedSized(Subconstruct):
     def _emitparse(self, code):
         return f"restream(io.read({self.length}), lambda io: ({self.subcon._compileparse(code)}))"
 
+    def _emitbuild(self, code):
+        aid = code.allocateId()
+        code.append(f"""
+        def FixedSizeBuild_{aid}(obj, io_):
+            from io import BytesIO
+            io = BytesIO()
+            {self.subcon._compilebuild(code)}
+            _buf = io.getvalue()
+            pad = {self.length} - len(_buf)
+            assert pad >= 0
+            io_.write(_buf + b"\\x00" * pad)
+            return obj
+        """)
+        return f"FixedSizeBuild_{aid}(obj, io)"
+
     def _emitfulltype(self, ksy, bitwise):
         return dict(size=repr(self.length).replace("this.",""), **self.subcon._compilefulltype(ksy, bitwise))
 
