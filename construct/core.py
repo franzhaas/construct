@@ -2634,23 +2634,23 @@ class GreedyRange(Subconstruct):
         return dict(type=self.subcon._compileprimitivetype(ksy, bitwise), repeat="eos")
 
     def _emitparse(self, code):
-        fname = f"parse_greadyrange_{code.allocateId()}"
+        fname = f"parse_greedyrange_{code.allocateId()}"
+        work_item = {False: f"list_.append({self.subcon._compileparse(code)})",
+                     True:  f"{self.subcon._compileparse(code)}"}[self.discard]
         block = f"""
             def {fname}(io, this):
-                list_ = ListContainer()
+                list_ = []
                 try:
                     while True:
                         fallback = io.tell()
-                        obj_ = {self.subcon._compileparse(code)}
-                        if not ({self.discard}):
-                            list_.append(obj_)
+                        {work_item}
                 except StopFieldError:
                     pass
                 except ExplicitError:
                     raise
                 except Exception:
                     io.seek(fallback)
-                return list_
+                return ListContainer(list_)
         """
         code.append(block)
         return f"{fname}(io, this)"
