@@ -4950,6 +4950,23 @@ class Prefixed(Subconstruct):
         sub = self.lengthfield.sizeof() if self.includelength else 0
         return f"restream(io.read(({self.lengthfield._compileparse(code)})-({sub})), lambda io: ({self.subcon._compileparse(code)}))"
 
+    def _emitbuild(self, code):
+        aid = code.allocateId()
+        code.append(f"""
+        def PrefixedBuild_{aid}(obj_, io_):
+            from io import BytesIO
+            io = BytesIO()
+            obj = obj_
+            {self.subcon._compilebuild(code)}
+            _data = io.getvalue()
+            obj = len(_data)
+            io = io_
+            {self.lengthfield._compilebuild(code)}
+            io.write(_data)
+            return obj_
+        """)
+        return f"PrefixedBuild_{aid}(obj, io)"
+
     def _emitseq(self, ksy, bitwise):
         return [
             dict(id="lengthfield", type=self.lengthfield._compileprimitivetype(ksy, bitwise)), 
