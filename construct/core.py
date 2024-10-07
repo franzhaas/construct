@@ -4434,26 +4434,30 @@ class Pointer(Subconstruct):
         return 0
 
     def _emitparse(self, code):
+        aid = code.allocateId()
+        seekDir = 2 if self.offset < 0 else 0
         code.append(f"""
-            def parse_pointer(io, offset, func):
+            def parse_pointer_{aid}(io):
                 fallback = io.tell()
-                io.seek(offset, 2 if offset < 0 else 0)
-                obj = func()
+                io.seek({self.offset}, {seekDir})
+                obj = {self.subcon._compileparse(code)}
                 io.seek(fallback)
                 return obj
         """)
-        return f"parse_pointer(io, {self.offset}, lambda: {self.subcon._compileparse(code)})"
+        return f"parse_pointer_{aid}(io)"
 
     def _emitbuild(self, code):
+        aid = code.allocateId()
+        seekDir = 2 if self.offset < 0 else 0
         code.append(f"""
-            def build_pointer(obj, io, offset, func):
+            def build_pointer_{aid}(obj, io):
                 fallback = io.tell()
-                io.seek(offset, 2 if offset < 0 else 0)
-                ret = func()
+                io.seek({self.offset}, {seekDir})
+                ret = {self.subcon._compilebuild(code)}
                 io.seek(fallback)
                 return ret
         """)
-        return f"build_pointer(obj, io, {self.offset}, lambda: {self.subcon._compilebuild(code)})"
+        return f"build_pointer_{aid}(obj, io)"
 
     def _emitprimitivetype(self, ksy, bitwise):
         offset = self.offset.__getfield__() if callable(self.offset) else self.offset
