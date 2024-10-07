@@ -2635,11 +2635,10 @@ class GreedyRange(Subconstruct):
 
     def _emitparse(self, code):
         fname = f"parse_greedyrange_{code.allocateId()}"
-        work_item = {False: f"list_.append({self.subcon._compileparse(code)})",
+        work_item = {False: f"yield {self.subcon._compileparse(code)}",
                      True:  f"{self.subcon._compileparse(code)}"}[self.discard]
         block = f"""
             def {fname}(io, this):
-                list_ = []
                 try:
                     while True:
                         fallback = io.tell()
@@ -2650,24 +2649,15 @@ class GreedyRange(Subconstruct):
                     raise
                 except Exception:
                     io.seek(fallback)
-                return ListContainer(list_)
         """
         code.append(block)
-        return f"{fname}(io, this)"
+        if False == self.discard:
+            return f"ListContainer({fname}(io, this))"
+        else:
+            return f"({fname}(io, this), ListContainer())[1]"
 
     def _emitbuild(self, code):
-        fname = f"build_greadyrange_{code.allocateId()}"
-        block = f"""
-            def {fname}(obj, io, this):
-                objiter = iter(obj)
-                list_ = ListContainer()
-                for item in objiter :
-                    obj_ = reuse(item, lambda obj: {self.subcon._compilebuild(code)})
-                    list_.append(obj_)
-                return list_
-        """
-        code.append(block)
-        return f"{fname}(obj, io, this)"
+        return f"ListContainer([{self.subcon._compilebuild(code)} for obj in iter(obj)])"
 
 
 class RepeatUntil(Subconstruct):
