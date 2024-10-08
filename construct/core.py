@@ -5,7 +5,7 @@ import struct, io, binascii, itertools, collections, pickle, sys, os, hashlib, i
 from construct.lib import *
 from construct.expr import *
 from construct.version import *
-
+import logging
 
 def _emit_function_expression_or_const(code, func, parameters="this"):
     if isinstance(func, ExprMixin) or (not callable(func)):
@@ -1934,6 +1934,19 @@ class EnumIntegerString(str):
         ret.intvalue = intvalue
         return ret
 
+    def __eq__(self, other):
+        if isinstance(other, int):
+            return (self.intvalue == other)
+        elif isinstance(other, type(self)):
+            return (self.intvalue == other.intvalue)
+        elif isinstance(other, str):
+            logging.warning("Using a str to compare with a enum value is depricated! this may lead to bugs in the future!")
+            return str(self) == other
+        raise NotImplementedError(f"Cont compare {type(self)} to {type(other)} {other}")
+
+    def __hash__(self):
+        return str(self).__hash__()
+
 
 class Enum(Adapter):
     r"""
@@ -1984,9 +1997,12 @@ class Enum(Adapter):
         for enum in merge:
             for enumentry in enum:
                 mapping[enumentry.name] = enumentry.value
-        self.encmapping = {EnumIntegerString.new(v,k):v for k,v in mapping.items()}
-        self.decmapping = {v:EnumIntegerString.new(v,k) for k,v in mapping.items()}
-        self.ksymapping = {v:k for k,v in mapping.items()}
+        encmappingFromNames  = {k:v for k, v in mapping.items()}
+        encmappingFromValues = {v:v for _, v in mapping.items()}
+
+        self.encmapping = {**encmappingFromNames, **encmappingFromValues}
+        self.decmapping = {v:EnumIntegerString.new(v,k) for k, v in mapping.items()}
+        self.ksymapping = {v:k for k, v in mapping.items()}
 
     def __getattr__(self, name):
         if name in self.encmapping:
@@ -2008,20 +2024,15 @@ class Enum(Adapter):
             raise MappingError("building failed, no mapping for %r" % (obj,), path=path)
 
     def _emitparse(self, code):
-        fname = f"factory_{code.allocateId()}"
-        code.append(f"{fname} = {repr(self.decmapping)}")
-        return f"reuse(({self.subcon._compileparse(code)}), lambda x: {fname}.get(x, EnumInteger(x)))"
+        return f"[x:={self.subcon._compileparse(code)}, {repr(self.decmapping)}.get(x, EnumInteger(x))][1]"
 
     def _emitbuild(self, code):
-        fname = f"factory_{code.allocateId()}"
-        code.append(f"{fname} = {repr(self.encmapping)}")
-        return f"reuse({fname}.get(obj, obj), lambda obj: ({self.subcon._compilebuild(code)}))"
+        return f"[obj:={repr(self.encmapping)}.get(obj, obj), {self.subcon._compilebuild(code)}, obj][2]"
 
     def _emitprimitivetype(self, ksy, bitwise):
         name = "enum_%s" % ksy.allocateId()
         ksy.enums[name] = self.ksymapping
         return name
-
 
 class BitwisableString(str):
     """Used internally."""
@@ -2113,9 +2124,6 @@ class FlagsEnum(Adapter):
             raise MappingError("building failed, unknown object: %r" % (obj,), path=path)
         except KeyError:
             raise MappingError("building failed, unknown label: %r" % (obj,), path=path)
-
-    def _emitparse(self, code):
-        return f"reuse(({self.subcon._compileparse(code)}), lambda x: Container({', '.join(f'{k}=bool(x & {v} == {v})' for k,v in self.flags.items()) }))"
 
     def _emitseq(self, ksy, bitwise):
         bitstotal = self.subcon.sizeof() * 8
