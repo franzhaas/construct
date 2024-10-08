@@ -5,7 +5,7 @@ import struct, io, binascii, itertools, collections, pickle, sys, os, hashlib, i
 from construct.lib import *
 from construct.expr import *
 from construct.version import *
-
+import logging
 
 def _emit_function_expression_or_const(code, func, parameters="this"):
     if isinstance(func, ExprMixin) or (not callable(func)):
@@ -1934,6 +1934,17 @@ class EnumIntegerString(str):
         ret.intvalue = intvalue
         return ret
 
+    def __eq__(self, other):
+        if isinstance(other, int):
+            return (self.intvalue == other)
+        elif isinstance(other, type(self)):
+            return (self.intvalue == other.intvalue)
+        elif isinstance(other, str):
+            return str(self) == other
+        raise NotImplementedError(f"Cont compare {type(self)} to {type(other)} {other}")
+
+    def __hash__(self):
+        return self.intvalue
 
 class Enum(Adapter):
     r"""
@@ -1984,9 +1995,12 @@ class Enum(Adapter):
         for enum in merge:
             for enumentry in enum:
                 mapping[enumentry.name] = enumentry.value
-        self.encmapping = {EnumIntegerString.new(v,k):v for k,v in mapping.items()}
-        self.decmapping = {v:EnumIntegerString.new(v,k) for k,v in mapping.items()}
-        self.ksymapping = {v:k for k,v in mapping.items()}
+        encmappingFromNames  = {k:v for k, v in mapping.items()}
+        encmappingFromValues = {v:v for _, v in mapping.items()}
+
+        self.encmapping = {**encmappingFromNames, **encmappingFromValues}
+        self.decmapping = {v:EnumIntegerString.new(v,k) for k, v in mapping.items()}
+        self.ksymapping = {v:k for k, v in mapping.items()}
 
     def __getattr__(self, name):
         if name in self.encmapping:
@@ -1999,6 +2013,9 @@ class Enum(Adapter):
         except KeyError:
             return EnumInteger(obj)
 
+    def _emitdecode(self, code):
+        return f"{_emit_source_or_use_linked(self.decmapping)}.get(obj, EnumInteger(obj))"
+
     def _encode(self, obj, context, path):
         try:
             if isinstance(obj, int):
@@ -2007,21 +2024,13 @@ class Enum(Adapter):
         except KeyError:
             raise MappingError("building failed, no mapping for %r" % (obj,), path=path)
 
-    def _emitparse(self, code):
-        fname = f"factory_{code.allocateId()}"
-        code.append(f"{fname} = {repr(self.decmapping)}")
-        return f"reuse(({self.subcon._compileparse(code)}), lambda x: {fname}.get(x, EnumInteger(x)))"
-
-    def _emitbuild(self, code):
-        fname = f"factory_{code.allocateId()}"
-        code.append(f"{fname} = {repr(self.encmapping)}")
-        return f"reuse({fname}.get(obj, obj), lambda obj: ({self.subcon._compilebuild(code)}))"
+    def _emitencode(self, code):
+        return f"{_emit_source_or_use_linked(self.encmapping)}.get(obj, EnumInteger(obj))"
 
     def _emitprimitivetype(self, ksy, bitwise):
         name = "enum_%s" % ksy.allocateId()
         ksy.enums[name] = self.ksymapping
         return name
-
 
 class BitwisableString(str):
     """Used internally."""
@@ -2113,9 +2122,6 @@ class FlagsEnum(Adapter):
             raise MappingError("building failed, unknown object: %r" % (obj,), path=path)
         except KeyError:
             raise MappingError("building failed, unknown label: %r" % (obj,), path=path)
-
-    def _emitparse(self, code):
-        return f"reuse(({self.subcon._compileparse(code)}), lambda x: Container({', '.join(f'{k}=bool(x & {v} == {v})' for k,v in self.flags.items()) }))"
 
     def _emitseq(self, ksy, bitwise):
         bitstotal = self.subcon.sizeof() * 8
@@ -4074,20 +4080,30 @@ class Switch(Construct):
     def _emitparse(self, code):
         fname = f"switch_cases_{code.allocateId()}"
         code.append(f"{fname} = {{}}")
+        selector = ""
         for key,sc in self.cases.items():
-            code.append(f"{fname}[{repr(key)}] = lambda io,this: {sc._compileparse(code)}")
+            if isinstance(key, EnumIntegerString):
+                selector = ".intvalue"
+                code.append(f"{fname}[{int(key)}] = lambda io,this: {sc._compileparse(code)}")
+            else:
+                code.append(f"{fname}[{_emit_source_or_use_linked(code, key)}] = lambda io,this: {sc._compileparse(code)}")
         defaultfname = f"switch_defaultcase_{code.allocateId()}"
         code.append(f"{defaultfname} = lambda io,this: {self.default._compileparse(code)}")
-        return f"{fname}.get({repr(self.keyfunc)}, {defaultfname})(io, this)"
+        return f"{fname}.get({_emit_source_or_use_linked(code, self.keyfunc)}{selector}, {defaultfname})(io, this)"
 
     def _emitbuild(self, code):
         fname = f"switch_cases_{code.allocateId()}"
         code.append(f"{fname} = {{}}")
+        selector = ""
         for key,sc in self.cases.items():
-            code.append(f"{fname}[{repr(key)}] = lambda obj,io,this: {sc._compilebuild(code)}")
+            if isinstance(key, EnumIntegerString):
+                selector = ".intvalue"
+                code.append(f"{fname}[{int(key)}] = lambda obj,io,this: {sc._compilebuild(code)}")
+            else:
+                code.append(f"{fname}[{_emit_source_or_use_linked(code, key)}] = lambda obj,io,this: {sc._compilebuild(code)}")
         defaultfname = f"switch_defaultcase_{code.allocateId()}"
         code.append(f"{defaultfname} = lambda obj,io,this: {self.default._compilebuild(code)}")
-        return f"{fname}.get({repr(self.keyfunc)}, {defaultfname})(obj, io, this)"
+        return f"{fname}.get({_emit_source_or_use_linked(code, self.keyfunc)}{selector}, {defaultfname})(obj, io, this)"
 
 
 class StopIf(Construct):
