@@ -7,6 +7,7 @@ from construct.expr import *
 from construct.version import *
 import logging
 
+
 def _emit_function_expression_or_const(code, func, parameters="this"):
     if isinstance(func, ExprMixin) or (not callable(func)):
         return repr(func)
