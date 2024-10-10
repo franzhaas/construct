@@ -1692,7 +1692,7 @@ def test_operators_issue_87():
 
 def test_from_issue_76():
     d = Aligned(4, Struct("a"/Byte, "f"/Bytes(lambda ctx: ctx.a)))
-    common(d, b"\x02\xab\xcd\x00", Container(a=2, f=b"\xab\xcd"))
+    common(d, b"\x02\xab\xcd\x00", Container(a=2, f=b"\xab\xcd"), compile=False)
 
 def test_from_issue_60():
     Header = Struct(
@@ -1975,21 +1975,21 @@ def test_exposing_members_context():
         "data" / Bytes(lambda this: this.count - this._subcons.count.sizeof()),
         Check(lambda this: this._subcons.count.sizeof() == 1),
     )
-    common(d, b"\x05four", Container(count=5, data=b"four"))
+    common(d, b"\x05four", Container(count=5, data=b"four"), compile=False)
 
     d = Sequence(
         "count" / Byte,
         "data" / Bytes(lambda this: this.count - this._subcons.count.sizeof()),
         Check(lambda this: this._subcons.count.sizeof() == 1),
     )
-    common(d, b"\x05four", [5,b"four",None])
+    common(d, b"\x05four", [5,b"four",None], compile=False)
 
     d = FocusedSeq("count",
         "count" / Byte,
         "data" / Padding(lambda this: this.count - this._subcons.count.sizeof()),
         Check(lambda this: this._subcons.count.sizeof() == 1),
     )
-    common(d, b'\x04\x00\x00\x00', 4, SizeofError)
+    common(d, b'\x04\x00\x00\x00', 4, SizeofError, compile=False)
 
     d = Union(None,
         "chars" / Byte[4],
