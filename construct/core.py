@@ -2004,15 +2004,21 @@ class Enum(Adapter):
         except KeyError:
             raise MappingError("building failed, no mapping for %r" % (obj,), path=path)
 
-    def _emitparse(self, code):
-        fname = f"factory_{code.allocateId()}"
-        code.append(f"{fname} = {repr(self.decmapping)}")
-        return f"reuse(({self.subcon._compileparse(code)}), lambda x: {fname}.get(x, EnumInteger(x)))"
+    def _emitencode(self, code):
+        fname = f"encode_enum_{code.allocateId()}"
+        code.append(f"""
+            def {fname}(obj):
+                return {repr(self.encmapping)}.get(obj, obj)
+        """)
+        return f"{fname}(obj)"
 
-    def _emitbuild(self, code):
-        fname = f"factory_{code.allocateId()}"
-        code.append(f"{fname} = {repr(self.encmapping)}")
-        return f"reuse({fname}.get(obj, obj), lambda obj: ({self.subcon._compilebuild(code)}))"
+    def _emitdecode(self, code):
+        fname = f"decode_enum_{code.allocateId()}"
+        code.append(f"""
+            def {fname}(obj):
+                return {repr(self.decmapping)}.get(obj, EnumInteger(obj))
+        """)
+        return f"{fname}(obj)"
 
     def _emitprimitivetype(self, ksy, bitwise):
         name = "enum_%s" % ksy.allocateId()
@@ -2166,16 +2172,15 @@ class Mapping(Adapter):
         except (KeyError, TypeError):
             raise MappingError("building failed, no encoding mapping for %r" % (obj,), path=path)
 
-    def _emitparse(self, code):
-        fname = f"factory_{code.allocateId()}"
-        code.append(f"{fname} = {repr(self.decmapping)}")
-        return f"{fname}[{self.subcon._compileparse(code)}]"
+    def _emitdecode(self, code):
+        aid = code.allocateId()
+        code.userfunction[aid] = self.decmapping
+        return f"userfunction[{aid}][obj]"
 
-    def _emitbuild(self, code):
-        fname = f"factory_{code.allocateId()}"
-        code.append(f"{fname} = {repr(self.encmapping)}")
-        return f"reuse({fname}[obj], lambda obj: ({self.subcon._compilebuild(code)}))"
-
+    def _emitencode(self, code):
+        aid = code.allocateId()
+        code.userfunction[aid] = self.encmapping
+        return f"userfunction[{aid}][obj]"
 
 #===============================================================================
 # structures and sequences
@@ -3602,9 +3607,6 @@ class Hex(Adapter):
     def _encode(self, obj, context, path):
         return obj
 
-    def _emitparse(self, code):
-        return self.subcon._compileparse(code)
-
     def _emitseq(self, ksy, bitwise):
         return self.subcon._compileseq(ksy, bitwise)
 
@@ -3615,10 +3617,27 @@ class Hex(Adapter):
         return self.subcon._compilefulltype(ksy, bitwise)
 
     def _emitdecode(self, code):
-        raise NotImplementedError
+        aid = code.allocateId()
+        intlen = 0
+        try:
+            intlen = 2*self.subcon._sizeof(None, None)
+        except Exception as _:
+            pass
+        code.append(f"""
+        from construct import HexDisplayedInteger
+        def HexDisplayedInteger_{aid}_decode(obj):
+            if isinstance(obj, int):
+                return HexDisplayedInteger.new(obj, "0{intlen}X")
+            if isinstance(obj, bytes):
+                return HexDisplayedBytes(obj)
+            if isinstance(obj, dict):
+                return HexDisplayedDict(obj)
+            return obj
+        """)
+        return f"HexDisplayedInteger_{aid}_decode(obj)"
 
     def _emitencode(self, code):
-        raise NotImplementedError
+        return "obj"
 
 
 class HexDump(Adapter):
@@ -6359,6 +6378,20 @@ class ExprAdapter(Adapter):
         super().__init__(subcon)
         self._decode = lambda obj,ctx,path: decoder(obj,ctx)
         self._encode = lambda obj,ctx,path: encoder(obj,ctx)
+        self._decode_orig = decoder
+        self._encode_orig = encoder
+    
+    def _emitdecode(self, code):
+        _aid = code.allocateId()
+        code.userfunction[_aid] = self._decode_orig
+        return f"userfunction[{_aid}](obj, None)"
+    
+    def _emitencode(self, code):
+        _aid = code.allocateId()
+        code.userfunction[_aid] = self._encode_orig
+        return f"userfunction[{_aid}](obj, None)"
+
+
 
 
 class ExprSymmetricAdapter(ExprAdapter):
