@@ -838,6 +838,7 @@ class Adapter(Subconstruct):
         code.append(f"""
         def adapter_{aid}(obj, io):
             obj = {self._emitencode(code)}
+            this = Container({{'_params':None}})
             return {self.subcon._compilebuild(code)}
 """)
         return f"adapter_{aid}(obj, io)"
@@ -845,12 +846,12 @@ class Adapter(Subconstruct):
     def _emitparse(self, code):
         aid = code.allocateId()
         code.append(f"""
-        def adapter_{aid}(io):
+        def adapter_{aid}(io, this):
             obj = {self.subcon._compileparse(code)}
             obj = {self._emitdecode(code)}
             return obj
 """)
-        return f"adapter_{aid}(io)"
+        return f"adapter_{aid}(io, this)"
 
 
 class SymmetricAdapter(Adapter):
@@ -3445,12 +3446,13 @@ class NamedTuple(Adapter):
         raise NamedTupleError("subcon is neither Struct Sequence Array GreedyRangeGreedyRange", path=path)
     
     def _emitdecode(self, code):
-        aid = code.allocateId()
-        code.userfunction[aid] = self.factory
+        factory_name = f"factory_{code.allocateId()}"
+        code.append(f"{factory_name} = collections.namedtuple({repr(self.tuplename)}, {repr(self.tuplefields)})")
+        
         if isinstance(self.subcon, Struct):
-            return "userfunction[" + str(aid) + "](*{name: value for name,value in obj.items() if name != '_io'})"
+            return factory_name + "(**{name: value for name, value in obj.items() if name != '_io'})"
         if isinstance(self.subcon, (Sequence,Array,GreedyRange)):
-            return f"userfunction[{aid}](*obj)"
+            return f"{factory_name}(*obj)"
         raise NamedTupleError("subcon is neither Struct Sequence Array GreedyRangeGreedyRange", path=path)
 
 
@@ -3463,7 +3465,7 @@ class NamedTuple(Adapter):
     
     def _emitencode(self, code):
         if isinstance(self.subcon, Struct):
-            return "Container({" + ", ".join((f"{sc.name}:getattr(obj,{sc.name}" for sc in self.subcon.subcons if sc.name)) + "})"
+            return "Container({" + ", ".join((f"'{sc.name}':getattr(obj,'{sc.name}')" for sc in self.subcon.subcons if sc.name)) + "})"
         if isinstance(self.subcon, (Sequence,Array,GreedyRange)):
             return "list(obj)"
         raise NamedTupleError("subcon is neither Struct Sequence Array GreedyRange")
