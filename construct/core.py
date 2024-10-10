@@ -15,6 +15,16 @@ def _emit_function_expression_or_const(code, func, parameters="this"):
         code.userfunction[aid] = func
         return f"userfunction[{aid}]({parameters})"
 
+def _emit_source_or_use_linked(code, obj):
+    try:
+        if eval(repr(obj)) == obj:
+            return repr(obj)
+    except Exception as _:
+        aid = code.allocateId()
+        code.userfunction[aid] = obj
+        return f"userfunction[{aid}]"
+
+
 #===============================================================================
 # exceptions
 #===============================================================================
@@ -2153,15 +2163,11 @@ class Mapping(Adapter):
         except (KeyError, TypeError):
             raise MappingError("building failed, no encoding mapping for %r" % (obj,), path=path)
 
-    def _emitparse(self, code):
-        fname = f"factory_{code.allocateId()}"
-        code.append(f"{fname} = {repr(self.decmapping)}")
-        return f"{fname}[{self.subcon._compileparse(code)}]"
+    def _emitdecode(self, code):
+        return f"{_emit_source_or_use_linked(code, self.decmapping)}[obj]"
 
-    def _emitbuild(self, code):
-        fname = f"factory_{code.allocateId()}"
-        code.append(f"{fname} = {repr(self.encmapping)}")
-        return f"reuse({fname}[obj], lambda obj: ({self.subcon._compilebuild(code)}))"
+    def _emitencode(self, code):
+        return f"{_emit_source_or_use_linked(code, self.encmapping)}[obj]"
 
 
 #===============================================================================
