@@ -3443,6 +3443,16 @@ class NamedTuple(Adapter):
         if isinstance(self.subcon, (Sequence,Array,GreedyRange)):
             return self.factory(*obj)
         raise NamedTupleError("subcon is neither Struct Sequence Array GreedyRangeGreedyRange", path=path)
+    
+    def _emitdecode(self, code):
+        aid = code.allocateId()
+        code.userfunction[aid] = self.factory
+        if isinstance(self.subcon, Struct):
+            return "userfunction[" + str(aid) + "](*{name: value for name,value in obj.items() if name != '_io'})"
+        if isinstance(self.subcon, (Sequence,Array,GreedyRange)):
+            return f"userfunction[{aid}](*obj)"
+        raise NamedTupleError("subcon is neither Struct Sequence Array GreedyRangeGreedyRange", path=path)
+
 
     def _encode(self, obj, context, path):
         if isinstance(self.subcon, Struct):
@@ -3450,16 +3460,12 @@ class NamedTuple(Adapter):
         if isinstance(self.subcon, (Sequence,Array,GreedyRange)):
             return list(obj)
         raise NamedTupleError("subcon is neither Struct Sequence Array GreedyRange", path=path)
-
-    def _emitparse(self, code):
-        fname = "factory_%s" % code.allocateId()
-        code.append("""
-            %s = collections.namedtuple(%r, %r)
-        """ % (fname, self.tuplename, self.tuplefields, ))
+    
+    def _emitencode(self, code):
         if isinstance(self.subcon, Struct):
-            return "%s(**(%s))" % (fname, self.subcon._compileparse(code), )
+            return "Container({" + ", ".join((f"{sc.name}:getattr(obj,{sc.name}" for sc in self.subcon.subcons if sc.name)) + "})"
         if isinstance(self.subcon, (Sequence,Array,GreedyRange)):
-            return "%s(*(%s))" % (fname, self.subcon._compileparse(code), )
+            return "list(obj)"
         raise NamedTupleError("subcon is neither Struct Sequence Array GreedyRange")
 
     def _emitseq(self, ksy, bitwise):
@@ -3470,12 +3476,6 @@ class NamedTuple(Adapter):
 
     def _emitfulltype(self, ksy, bitwise):
         return self.subcon._compilefulltype(ksy, bitwise)
-
-    def _emitdecode(self, code):
-        raise NotImplementedError
-
-    def _emitencode(self, code):
-        raise NotImplementedError
 
 
 class TimestampAdapter(Adapter):
