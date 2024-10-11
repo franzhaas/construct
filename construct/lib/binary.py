@@ -45,7 +45,7 @@ def integer2bytes(number, width, signed=False):
         '\x00\x00\x00\x13'
     """
     # pypy does not check this in int.to_bytes, lazy fuckers
-    if not width >= 1:
+    if not width >= 0:
         raise ValueError(f"width {width} must be positive")
 
     try:
