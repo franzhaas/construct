@@ -983,7 +983,7 @@ class Bytes(Construct):
         return f"io.read({self.length})"
 
     def _emitbuild(self, code):
-        return f"(io.write(obj), obj)[1]"
+        return f"(io.write(integer2bytes(obj, {self.length}) if isinstance(obj, int) else obj), obj)[1]"
 
     def _emitfulltype(self, ksy, bitwise):
         return dict(size=self.length)

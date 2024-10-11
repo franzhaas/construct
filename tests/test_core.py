@@ -22,6 +22,11 @@ def test_bytes():
     assert raises(d.sizeof) == SizeofError
     assert raises(d.sizeof, n=4) == 4
 
+def test_Bytes_issue_1083():
+    d = Struct("LEN" / Byte, "packet" / Bytes(this.LEN),)
+    d.build({"LEN":0, "packet": 0}) == b'\x00\x00\x00\x00'
+    d.compile().build({"LEN":0, "packet": 0}) == b'\x00\x00\x00\x00'
+
 def test_greedybytes():
     common(GreedyBytes, b"1234", b"1234", SizeofError)
 
