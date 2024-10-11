@@ -15,21 +15,22 @@ def test_bytes():
 
     d = Bytes(this.n)
     common(d, b"1234", b"1234", 4, n=4)
-    assert d.parse(b"1234567890",n=4) == b"1234"
-    assert d.build(1, n=4) == b"\x00\x00\x00\x01"
-    assert raises(d.build, b"", n=4) == StreamError
-    assert raises(d.build, b"toolong", n=4) == StreamError
-    assert raises(d.sizeof) == SizeofError
-    assert raises(d.sizeof, n=4) == 4
+    assert d.build(1, n=4) == b"\x00\x00\x00\x01" # There is discussion about this behavior ongoing...
+    for d in [d, d.compile()]:
+        assert d.parse(b"1234567890",n=4) == b"1234"
+        assert raises(d.build, b"", n=4) == StreamError
+        assert raises(d.build, b"toolong", n=4) == StreamError
+        assert raises(d.sizeof) == SizeofError
+        assert raises(d.sizeof, n=4) == 4
 
 def test_greedybytes():
     common(GreedyBytes, b"1234", b"1234", SizeofError)
 
 def test_bytes_issue_827():
-    d = Bytes(3)
-    assert d.build(bytearray(b'\x01\x02\x03')) == b'\x01\x02\x03'
-    d = GreedyBytes
-    assert d.build(bytearray(b'\x01\x02\x03')) == b'\x01\x02\x03'
+    for d in [Bytes(3), Bytes(3).compile()]:
+        assert d.build(bytearray(b'\x01\x02\x03')) == b'\x01\x02\x03'
+    for d in [GreedyBytes, GreedyBytes.compile()]:
+        assert d.build(bytearray(b'\x01\x02\x03')) == b'\x01\x02\x03'
 
 def test_bitwise():
     common(Bitwise(Bytes(8)), b"\xff", b"\x01\x01\x01\x01\x01\x01\x01\x01", 1)
@@ -96,11 +97,12 @@ def test_floats():
 def test_formatfield():
     d = FormatField("<","L")
     common(d, b"\x01\x02\x03\x04", 0x04030201, 4)
-    assert raises(d.parse, b"") == StreamError
-    assert raises(d.parse, b"\x01\x02") == StreamError
-    assert raises(d.build, 2**100) == FormatFieldError
-    assert raises(d.build, 1e9999) == FormatFieldError
-    assert raises(d.build, "string not int") == FormatFieldError
+    for d in [d]:
+        assert raises(d.parse, b"") == StreamError, f"{d}"
+        assert raises(d.parse, b"\x01\x02") == StreamError
+        assert raises(d.build, 2**100) == FormatFieldError
+        assert raises(d.build, 1e9999) == FormatFieldError
+        assert raises(d.build, "string not int") == FormatFieldError
 
 def test_formatfield_ints_randomized():
     for endianess,dtype in itertools.product("<>=","bhlqBHLQ"):
@@ -118,25 +120,27 @@ def test_formatfield_floats_randomized():
     # http://stackoverflow.com/questions/39676482/struct-packstruct-unpackfloat-is-inconsistent-on-py3
     for endianess,dtype in itertools.product("<>=","fd"):
         d = FormatField(endianess, dtype)
-        for i in range(100):
-            x = random.random()*12345
-            if dtype == "d":
-                assert d.parse(d.build(x)) == x
-            else:
-                assert abs(d.parse(d.build(x)) - x) < 1e-3
-        for i in range(100):
-            b = os.urandom(d.sizeof())
-            if not math.isnan(d.parse(b)):
-                assert d.build(d.parse(b)) == b
+        for d in [d, d.compile()]:
+            for i in range(100):
+                x = random.random()*12345
+                if dtype == "d":
+                    assert d.parse(d.build(x)) == x
+                else:
+                    assert abs(d.parse(d.build(x)) - x) < 1e-3
+            for i in range(100):
+                b = os.urandom(d.sizeof())
+                if not math.isnan(d.parse(b)):
+                    assert d.build(d.parse(b)) == b
 
 def test_formatfield_bool_issue_901():
     d = FormatField(">","?")
-    assert d.parse(b"\x01") == True
-    assert d.parse(b"\xff") == True
-    assert d.parse(b"\x00") == False
-    assert d.build(True) == b"\x01"
-    assert d.build(False) == b"\x00"
-    assert d.sizeof() == 1
+    for d in [d, d.compile()]:
+        assert d.parse(b"\x01") == True
+        assert d.parse(b"\xff") == True
+        assert d.parse(b"\x00") == False
+        assert d.build(True) == b"\x01"
+        assert d.build(False) == b"\x00"
+        assert d.sizeof() == 1
 
 def test_bytesinteger():
     d = BytesInteger(0)
@@ -190,46 +194,53 @@ def test_varint():
         assert d.parse(d.build(n)) == n
     for n in range(0, 127):
         common(d, int2byte(n), n, SizeofError)
-    assert raises(d.parse, b"") == StreamError
-    assert raises(d.build, -1) == IntegerError
-    assert raises(d.build, None) == IntegerError
-    assert raises(d.sizeof) == SizeofError
+    for d in [d, d.compile()]:
+        assert raises(d.parse, b"") == StreamError
+        assert raises(d.build, -1) == IntegerError
+        assert raises(d.build, None) == IntegerError
+        assert raises(d.sizeof) == SizeofError
 
 def test_varint_issue_705():
     # no asserts needed
     d = Struct('namelen' / VarInt, 'name' / Bytes(this.namelen))
-    d.build(Container(namelen = 400, name = bytes(400)))
+    for d in [d, d.compile()]:    
+        d.build(Container(namelen = 400, name = bytes(400)))
     d = Struct('namelen' / VarInt, Check(this.namelen == 400))
-    d.build(dict(namelen=400))
+    for d in [d, d.compile()]:
+        d.build(dict(namelen=400))
 
 def test_zigzag():
     d = ZigZag
     common(d, b"\x00", 0)
     common(d, b"\x05", -3)
     common(d, b"\x06", 3)
-    for n in [0,1,5,100,255,256,65535,65536,2**32,2**100]:
-        assert d.parse(d.build(n)) == n
-    for n in range(0, 63):
-        common(d, int2byte(n*2), n, SizeofError)
-    assert raises(d.parse, b"") == StreamError
-    assert raises(d.build, None) == IntegerError
-    assert raises(d.sizeof) == SizeofError
+    for d in [d, d.compile()]:
+        for n in [0,1,5,100,255,256,65535,65536,2**32,2**100]:
+            assert d.parse(d.build(n)) == n
+        for n in range(0, 63):
+            common(d, int2byte(n*2), n, SizeofError)
+        assert raises(d.parse, b"") == StreamError
+        assert raises(d.build, None) == IntegerError
+        assert raises(d.sizeof) == SizeofError
 
 def test_zigzag_regression():
     d = ZigZag
-    assert isinstance(d.parse(b"\x05"), int)
-    assert isinstance(d.parse(b"\x06"), int)
+    for d in [d, d.compile()]:
+        assert isinstance(d.parse(b"\x05"), int)
+        assert isinstance(d.parse(b"\x06"), int)
     d = Struct('namelen' / ZigZag, Check(this.namelen == 400))
     # no asserts needed
-    d.build(dict(namelen=400))
+    for d in [d, d.compile()]:
+        d.build(dict(namelen=400))
 
 def test_paddedstring():
     common(PaddedString(10, "utf8"), b"hello\x00\x00\x00\x00\x00", u"hello", 10)
 
     d = PaddedString(100, "ascii")
-    assert d.parse(b"X"*100) == u"X"*100
-    assert d.build(u"X"*100) == b"X"*100
-    assert raises(d.build, u"X"*200) == PaddingError
+    for d in [d, d.compile()]:
+        assert d.parse(b"X"*100) == u"X"*100
+        assert d.build(u"X"*100) == b"X"*100
+        assert raises(d.build, u"X"*200) == PaddingError
 
     for e,us in [("utf8",1),("utf16",2),("utf_16_le",2),("utf32",4),("utf_32_le",4)]:
         s = u"Афон"
@@ -257,8 +268,9 @@ def test_pascalstring():
 
 def test_pascalstring_issue_960():
     d = Select(PascalString(Byte, "ascii"))
-    assert raises(d.parse, b"\x01\xff") == SelectError
-    assert raises(d.build, u"Афон") == SelectError
+    for d in [d, d.compile()]:
+        assert raises(d.parse, b"\x01\xff") == SelectError
+        assert raises(d.build, u"Афон") == SelectError
 
 def test_cstring():
     for e,us in [("utf8",1),("utf16",2),("utf_16_le",2),("utf32",4),("utf_32_le",4)]:
@@ -297,18 +309,19 @@ def test_enum():
     d = Enum(Byte, one=1, two=2, four=4, eight=8)
     common(d, b"\x01", "one", 1)
     common(d, b"\xff", 255, 1)
-    assert d.parse(b"\x01") == d.one
-    assert d.parse(b"\x01") == "one"
-    assert int(d.parse(b"\x01")) == 1
-    assert d.parse(b"\xff") == 255
-    assert int(d.parse(b"\xff")) == 255
-    assert d.build(8) == b'\x08'
-    assert d.build(255) == b"\xff"
-    assert d.build(d.eight) == b'\x08'
-    assert d.one == "one"
-    assert int(d.one) == 1
-    assert raises(d.build, "unknown") == MappingError
-    assert raises(lambda: d.missing) == AttributeError
+    assert raises(d.build, "unknown") == MappingError #todo in compiled
+    for d in [d, d.compile()]:
+        assert d.parse(b"\x01") == d.one
+        assert d.parse(b"\x01") == "one"
+        assert int(d.parse(b"\x01")) == 1
+        assert d.parse(b"\xff") == 255
+        assert int(d.parse(b"\xff")) == 255
+        assert d.build(8) == b'\x08'
+        assert d.build(255) == b"\xff"
+        assert d.build(d.eight) == b'\x08'
+        assert d.one == "one"
+        assert int(d.one) == 1
+        assert raises(lambda: d.missing) == AttributeError
 
 def test_enum_enum34():
     import enum
@@ -360,18 +373,24 @@ def test_enum_issue_677():
     d = Enum(Byte, one=1)
     common(d, b"\xff", 255, 1)
     common(d, b"\x01", EnumIntegerString.new(1, "one"), 1)
-    assert isinstance(d.parse(b"\x01"), EnumIntegerString)
+    for d in [d, d.compile()]:
+        assert d.parse(b"\x01") == EnumIntegerString.new(1, "one")
+        assert isinstance(d.parse(b"\x01"), EnumIntegerString)
     d = Enum(Byte, one=1).compile()
     common(d, b"\xff", 255, 1)
     common(d, b"\x01", EnumIntegerString.new(1, "one"), 1)
-    assert isinstance(d.parse(b"\x01"), EnumIntegerString)
+    for d in [d, d.compile()]:
+        assert d.parse(b"\x01") == EnumIntegerString.new(1, "one")
+        assert isinstance(d.parse(b"\x01"), EnumIntegerString)
 
     d = Struct("e" / Enum(Byte, one=1))
-    assert str(d.parse(b"\x01")) == 'Container: \n    e = (enum) one 1'
-    assert str(d.parse(b"\xff")) == 'Container: \n    e = (enum) (unknown) 255'
+    for d in [d, d.compile()]:
+        assert str(d.parse(b"\x01")) == 'Container: \n    e = (enum) one 1'
+        assert str(d.parse(b"\xff")) == 'Container: \n    e = (enum) (unknown) 255'
     d = Struct("e" / Enum(Byte, one=1)).compile()
-    assert str(d.parse(b"\x01")) == 'Container: \n    e = (enum) one 1'
-    assert str(d.parse(b"\xff")) == 'Container: \n    e = (enum) (unknown) 255'
+    for d in [d, d.compile()]:
+        assert str(d.parse(b"\x01")) == 'Container: \n    e = (enum) one 1'
+        assert str(d.parse(b"\xff")) == 'Container: \n    e = (enum) (unknown) 255'
 
 @xfail(reason="Cannot implement this in EnumIntegerString.")
 def test_enum_issue_992():
