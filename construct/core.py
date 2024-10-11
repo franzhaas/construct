@@ -983,7 +983,11 @@ class Bytes(Construct):
         return f"io.read({self.length})"
 
     def _emitbuild(self, code):
-        return f"(io.write(obj), obj)[1]"
+        code.append("""
+        def throw_exception(exception):
+            raise exception
+        """)
+        return f"""(io.write(obj) if len(obj)=={self.length} else throw_exception(StreamError(f"bytes object of wrong length, expected {self.length}, found {{len(obj)}}")), obj)[1]"""
 
     def _emitfulltype(self, ksy, bitwise):
         return dict(size=self.length)
@@ -1968,7 +1972,13 @@ class Enum(Adapter):
                 mapping[enumentry.name] = enumentry.value
         self.encmapping = {EnumIntegerString.new(v,k):v for k,v in mapping.items()}
         self.decmapping = {v:EnumIntegerString.new(v,k) for k,v in mapping.items()}
-        self.ksymapping = {v:k for k,v in mapping.items()}
+        self.ksymapping = dict(mapping.items())
+
+    def compile(self, filename=None):
+        compiledObject = super().compile(filename)
+        for name, value in self.ksymapping.items():
+            setattr(compiledObject, name, EnumIntegerString.new(value, name))
+        return compiledObject
 
     def __getattr__(self, name):
         if name in self.encmapping:
