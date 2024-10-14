@@ -1,3 +1,4 @@
+import os
 import ast
 import itertools
 import copy
@@ -12,10 +13,11 @@ def a(d=9, e=11):
 
 def outer(c, b):
     d = a(e=2, d=1)
-    d = a(b, d)
+    for x in range(4):
+        d = a(b, d)
     d = a()
-    a()
     d = 2+3+d
+    a()
     return d * 2 + 1
 
 result = outer(c=3, b=4)
@@ -42,6 +44,34 @@ def _add_prefix_to_variables(function_ast, prefix):
     ast.fix_missing_locations(new_function_ast)
     return new_function_ast
 
+
+def inline_functionInFunction(ast2workOn, origToInline):
+    fName = origToInline.name
+    for item in ast2workOn.body:
+        cols = ' '*item.col_offset
+        if (isinstance(item, ast.Assign) or isinstance(item, ast.Expr)) and isinstance(item.value, ast.Call) and item.value.func.id == fName:
+            prefix = f"__inlining_stage_{next(_counter)}_"
+            toInline = _add_prefix_to_variables(copy.deepcopy(origToInline), prefix)
+            withoutDefault = len(toInline.args.args) - len(toInline.args.defaults)
+            try:
+                targets  = ", ".join(ast.unparse(item) for item in item.targets) + " = "
+            except AttributeError:
+                targets = ""
+            args = copy.deepcopy(item.value.args + toInline.args.defaults[len(item.value.args)-withoutDefault:])
+            for arg in item.value.keywords:
+                arg.arg = prefix + arg.arg
+            yield f"{cols}({', '.join(ast.unparse(item) for item in toInline.args.args)}) = ({', '.join(ast.unparse(item) for item in args)})"
+            if item.value.keywords:
+                yield f"{cols}{'; '.join(ast.unparse(item) for item in item.value.keywords)}"
+            yield from (f"{cols}{ast.unparse(innerItem)}" for innerItem in toInline.body[:-1])
+            yield f"{cols}{targets}{ast.unparse(toInline.body[-1].value)}"
+        elif hasattr(item, "body"):
+            yield f"{cols}{ast.unparse(item).split(os.linesep)[0]}"
+            yield from inline_functionInFunction(copy.deepcopy(item), copy.deepcopy(origToInline))
+        else:
+            yield f"{cols}{ast.unparse(item)}"
+
+
 def inline_functionInOtherFunctions(source, function_name):
     tree = ast.parse(source)
     toInline = [item for item in tree.body if isinstance(item, ast.FunctionDef) and item.name == function_name]
@@ -50,43 +80,10 @@ def inline_functionInOtherFunctions(source, function_name):
 
     for item in tree.body:
         if isinstance(item, ast.FunctionDef) and item.name != function_name:
-            yield f"def {item.name}({ast.unparse(item.args)}):"
+            yield f"{' '*item.col_offset}def {item.name}({ast.unparse(item.args)}):"
             yield from inline_functionInFunction(item, toInline)
         else:
             yield ast.unparse(item)
-
-
-def __inline_worker(item, withoutDefault, toInline, prefix, assignTarget):
-    args = item.value.args + toInline.args.defaults[len(item.value.args)-withoutDefault:]
-    for arg in item.value.keywords:
-        arg.arg = prefix + arg.arg
-    yield f"    ({', '.join(ast.unparse(item) for item in toInline.args.args)}) = ({', '.join(ast.unparse(item) for item in args)})"
-    if hasattr(item.value, "keywords"):
-        yield f"    {'; '.join(ast.unparse(item) for item in item.value.keywords)}"
-    for innerItem in toInline.body[:-1]:
-        yield "    " + ast.unparse(innerItem)
-    yield "    " + f"{assignTarget}{ast.unparse(toInline.body[-1].value)}"
-
-def inline_functionInFunction(functionAst, origToInline):
-    fName = origToInline.name
-    for item in functionAst.body:
-        prefix = f"__inlining_stage_{next(_counter)}_"
-        toInline = _add_prefix_to_variables(copy.deepcopy(origToInline), prefix)
-        withoutDefault = len(toInline.args.args) - len(toInline.args.defaults)
-
-        if isinstance(item, ast.Assign) and isinstance(item.value, ast.Call) and item.value.func.id == fName:
-            targets  = ", ".join(ast.unparse(item) for item in item.targets)
-            args = item.value.args + toInline.args.defaults[len(item.value.args)-withoutDefault:]
-            for arg in item.value.keywords:
-                arg.arg = prefix + arg.arg
-            yield f"    ({', '.join(ast.unparse(item) for item in toInline.args.args)}) = ({', '.join(ast.unparse(item) for item in args)})"
-            if hasattr(item.value, "keywords"):
-                yield f"    {'; '.join(ast.unparse(item) for item in item.value.keywords)}"
-            for innerItem in toInline.body[:-1]:
-                yield "    " + ast.unparse(innerItem)
-            yield "    " + f"{targets} = {ast.unparse(toInline.body[-1].value)}"
-        else:
-            yield "    " + ast.unparse(item)
 
 
 a = (list(inline_functionInOtherFunctions(source, "a")))
