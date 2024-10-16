@@ -5,6 +5,7 @@ import struct, io, binascii, itertools, collections, pickle, sys, os, hashlib, i
 from construct.lib import *
 from construct.expr import *
 from construct.version import *
+from construct.inliner import inlineAllFunctions
 
 
 #===============================================================================
@@ -551,7 +552,8 @@ class Construct(object):
                 return {self._compilebuild(code)}
             compiled = Compiled(parseall, buildall)
         """)
-        source = code.toString()
+
+        source = inlineAllFunctions(code.toString())
 
         if filename:
             with open(filename, "wt") as f:
