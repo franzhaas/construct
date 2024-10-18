@@ -161,5 +161,5 @@ def inlineAllFunctions(source):
         counted = collections.Counter(item[0] for item in inlineAble)
         if inlineAble and max(counted.values())==1 and min(counted.values()) == 1:
             inlineAble = {name: val for name, val in inlineAble}
-            source = ast.unparse(ast.parse(os.linesep.join(_inline_functionInOtherFunctions(tree, inlineAble)))) # format code...
+            source = ((os.linesep.join(_inline_functionInOtherFunctions(tree, inlineAble)))) # format code...
     return source
