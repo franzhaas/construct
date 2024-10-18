@@ -2725,7 +2725,8 @@ class RepeatUntil(Subconstruct):
                     if not ({self.discard}):
                         list_.append(obj_)
                     if ({self.predicate}):
-                        return list_
+                        break
+                return list_
         """
         code.append(block)
         return f"{fname}(io, this)"
@@ -4534,7 +4535,6 @@ class Peek(Subconstruct):
                 return rval
         """)
         return f"parse_peek_{aid}(io)"
-
     def _emitbuild(self, code):
         return "obj"
 
