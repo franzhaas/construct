@@ -137,6 +137,10 @@ def _is_item_a_inlineable_functiondef(item):
         if not _no_nested_lambdas_or_functions(item):
             logging.warning(f"{item.name}: cant be inlined due to nested function/lambda")
             return False
+        code = ast.unparse(item)
+        if code.count("lambda") > 0:
+            logging.warning(f"{item.name}: cant be inlined due to lambda")
+            return False
         returnCount = ast.unparse(item).count("return")
         if returnCount == 0:
             return True
