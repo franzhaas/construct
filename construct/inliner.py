@@ -10,6 +10,7 @@ import builtins
 import logging
 import traceback
 
+_linesep = "\n"
 _counter = itertools.count()
 
 class _NoLambdasNoNestedFunctionsVisitor(ast.NodeVisitor):
@@ -91,25 +92,25 @@ def _inline_functionInFunction(ast2workOn, excludes, inlineAble):
                 orderedNames = [f"{prefix}{name.arg}" for name in argNameList]
                 yield f"{cols}({', '.join(orderedNames)}) = ({', '.join(ast.unparse(argsDict[name]) for name in orderedNames)})"
                 for element in toInline.body[:-1]:
-                    yield from (f"{cols}{line}" for line in ast.unparse(element).split("\n")) 
+                    yield from (f"{cols}{line}" for line in ast.unparse(element).split(_linesep)) 
                 lastEntry = toInline.body[-1]
                 if isinstance(lastEntry, ast.Return):
                     yield f"{cols}{targets}{ast.unparse(lastEntry.value)}"
                 else:
-                    yield from (f"{cols}{item}" for item in ast.unparse(lastEntry).split("\n"))
+                    yield from (f"{cols}{item}" for item in ast.unparse(lastEntry).split(_linesep))
                     if targets:
                         yield f"{cols}{targets}None"
             elif isinstance(item, ast.Try):
                 yield f"{cols}try:"
                 yield from (f"{cols}{item}" for item in _inline_functionInFunction(item.body, excludes, inlineAble))
                 for handler in item.handlers:
-                    yield f"{cols}{ast.unparse(handler).split("\n")[0]}"
+                    yield f"{cols}{ast.unparse(handler).split(_linesep)[0]}"
                     yield from (f"{cols}{innerItem}" for innerItem in _inline_functionInFunction(handler.body, excludes, inlineAble))
                 if item.finalbody:
                     yield f"{cols}finally:"
                     yield from (f"{cols}{item}" for item in _inline_functionInFunction(item.finalbody, excludes, inlineAble))
             elif hasattr(item, "body"):
-                yield f"{cols}{ast.unparse(item).split("\n")[0]}"
+                yield f"{cols}{ast.unparse(item).split(_linesep)[0]}"
                 yield from (f"{cols}{item}" for item in _inline_functionInFunction((item.body), excludes, inlineAble))
             else:
                 yield f"{cols}{ast.unparse(item)}"
@@ -161,5 +162,5 @@ def inlineAllFunctions(source):
         counted = collections.Counter(item[0] for item in inlineAble)
         if inlineAble and max(counted.values())==1 and min(counted.values()) == 1:
             inlineAble = {name: val for name, val in inlineAble}
-            source = (("\n".join(_inline_functionInOtherFunctions(tree, inlineAble)))) # format code...
+            source = ast.unparse(ast.parse(_linesep.join(_inline_functionInOtherFunctions(tree, inlineAble)))) # format code...
     return source
