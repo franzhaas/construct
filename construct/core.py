@@ -4518,19 +4518,22 @@ class Peek(Subconstruct):
         return 0
 
     def _emitparse(self, code):
-        code.append("""
-            def parse_peek(io, func):
+        aid = code.allocateId()
+        code.append(f"""
+            def parse_peek_{aid}(io):
                 fallback = io.tell()
+                rval = None
                 try:
-                    return func()
+                    rval = {self.subcon._compileparse(code)}
                 except ExplicitError:
                     raise
                 except ConstructError:
                     pass
                 finally:
                     io.seek(fallback)
+                return rval
         """)
-        return "parse_peek(io, lambda: %s)" % (self.subcon._compileparse(code),)
+        return f"parse_peek_{aid}(io)"
 
     def _emitbuild(self, code):
         return "obj"
