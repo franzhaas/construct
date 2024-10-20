@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+import subprocess
+import tempfile
 from tests.declarativeunittest import *
 from construct import *
 from construct.lib import *
@@ -2447,3 +2449,14 @@ def test_issue_1014():
         )),
     )
     assert d.parse(bytes([1,2,3,4,5,6])) == Container(version=0x0102, box=Container(position=3, payload=b'\x04\x05\x06'))
+
+def test_issue_1082():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        oFileName = tmpdir + "blob"
+        with open(oFileName, "wb") as of:
+            of.write(b"\x01\x02")
+        d = Prefixed(Int8ub, Byte)
+        pid = subprocess.Popen(["cat", oFileName], stdout=subprocess.PIPE)
+        assert 2 == d.parse_stream(pid.stdout)
+        pid = subprocess.Popen(["cat", oFileName], stdout=subprocess.PIPE)
+        assert 2 == d.compile().parse_stream(pid.stdout)
