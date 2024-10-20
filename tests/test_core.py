@@ -2458,7 +2458,7 @@ def test_issue_1082():
             of.write(b"\x01\x02")
         d = Prefixed(Int8ub, Byte)
         outPuter = {"Linux": "cat", "Windows": "type"}[platform.system()]
-        pid = subprocess.Popen([outPuter, oFileName], stdout=subprocess.PIPE)
+        pid = subprocess.Popen(f"{outPuter} {oFileName}", stdout=subprocess.PIPE, shell=True)
         assert 2 == d.parse_stream(pid.stdout)
-        pid = subprocess.Popen([outPuter, oFileName], stdout=subprocess.PIPE)
+        pid = subprocess.Popen(f"{outPuter} {oFileName}", stdout=subprocess.PIPE, shell=True)
         assert 2 == d.compile().parse_stream(pid.stdout)
