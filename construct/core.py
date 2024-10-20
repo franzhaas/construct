@@ -242,7 +242,7 @@ class BytesIOWithOffsets(io.BytesIO):
             offset = stream_tell(stream, path)
             contents = stream_read(stream, length, path)
             return BytesIOWithOffsets(contents, stream, offset)
-        except io.UnsupportedOperation:
+        except (io.UnsupportedOperation, StreamError):
             return io.BytesIO(stream_read(stream, length, path))
 
     def __init__(self, contents: bytes, parent_stream, offset: int):
