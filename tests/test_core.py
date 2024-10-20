@@ -2454,11 +2454,13 @@ def test_issue_1014():
 def test_issue_1082():
     with tempfile.TemporaryDirectory() as tmpdir:
         oFileName = tmpdir + "blob"
-        with open(oFileName, "wb") as of:
-            of.write(b"\x01\x02")
-        d = Prefixed(Int8ub, Byte)
         outPuter = {"Linux": "cat", "Windows": "type"}[platform.system()]
-        pid = subprocess.Popen(f"{outPuter} {oFileName}", stdout=subprocess.PIPE, shell=True)
-        assert 2 == d.parse_stream(pid.stdout)
-        pid = subprocess.Popen(f"{outPuter} {oFileName}", stdout=subprocess.PIPE, shell=True)
-        assert 2 == d.compile().parse_stream(pid.stdout)
+        with open(oFileName, "wb") as of:
+            of.write(b"\x02\x02\x00")
+
+        for d in [Prefixed(Int8ub, Byte), FixedSized(2, Byte)]:
+            pid = subprocess.Popen(f"{outPuter} {oFileName}", stdout=subprocess.PIPE, shell=True)
+            assert 2 == d.parse_stream(pid.stdout)
+            pid = subprocess.Popen(f"{outPuter} {oFileName}", stdout=subprocess.PIPE, shell=True)
+            assert 2 == d.compile().parse_stream(pid.stdout)
+
