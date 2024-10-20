@@ -8,6 +8,7 @@ import collections
 import builtins
 import logging
 import traceback
+from io import BytesIO
 from dataclasses import dataclass
 
 _linesep = "\n"
@@ -42,7 +43,7 @@ class _VariablePrefixer(ast.NodeTransformer):
         self._exclueds = excludes
 
     def visit_Name(self, node):
-        if isinstance(node.ctx, (ast.Store, ast.Load, ast.Del)) and node.id not in self._exclueds and not node.id.startswith("BytesIO") and not node.id.startswith("collections") and not node.id.startswith("itertools"):
+        if isinstance(node.ctx, (ast.Store, ast.Load, ast.Del)) and node.id not in self._exclueds:
             node.id = f"{self.prefix}{node.id}"
         return self.generic_visit(node)
 
@@ -114,10 +115,17 @@ def _inline_functionInFunction(ast2workOn, excludes, inlineAble):
 
 def _inline_functionInOtherFunctions(tree, inlineAbles):
     ast.fix_missing_locations(tree)
-    excludes = set(itertools.chain(dir(construct),  dir(construct.lib), ("struct."+ item for item in dir(struct)),
-                   ("collections."+ item for item in dir(collections)), ("itertools."+ item for item in dir(itertools)), 
-                   dir(builtins), itertools.chain.from_iterable([ast.unparse(item) for item in target.targets] for target in tree.body if isinstance(target, ast.Assign)),
-                   (item.name for item in tree.body if isinstance(item, ast.FunctionDef)))) ^ set(["this", "list_"])
+    excludes = set(itertools.chain(dir(construct),
+                                   dir(construct.lib),
+                                   ("struct."+ item for item in dir(struct)),
+                                   ("BytesIO."+ item for item in dir(BytesIO)),
+                                   ("BytesIO",),
+                                   ("itertools."+ item for item in dir(itertools)),
+                                   ("collections."+ item for item in dir(collections)), 
+                                   ("itertools."+ item for item in dir(itertools)), 
+                                   dir(builtins),
+                                   itertools.chain.from_iterable([ast.unparse(item) for item in target.targets] for target in tree.body if isinstance(target, ast.Assign)),
+                                   (item.name for item in tree.body if isinstance(item, ast.FunctionDef)))) ^ set(["this", "list_"])
     for item in tree.body:
         if isinstance(item, ast.FunctionDef):
             yield f"{' '*item.col_offset}def {item.name}({ast.unparse(item.args)}):"
