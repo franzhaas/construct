@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import platform
 import subprocess
 import tempfile
 from tests.declarativeunittest import *
@@ -2456,7 +2457,8 @@ def test_issue_1082():
         with open(oFileName, "wb") as of:
             of.write(b"\x01\x02")
         d = Prefixed(Int8ub, Byte)
-        pid = subprocess.Popen(["cat", oFileName], stdout=subprocess.PIPE)
+        outPuter = {"Linux": "cat", "Windows": "type"}[platform.system()]
+        pid = subprocess.Popen([outPuter, oFileName], stdout=subprocess.PIPE)
         assert 2 == d.parse_stream(pid.stdout)
-        pid = subprocess.Popen(["cat", oFileName], stdout=subprocess.PIPE)
+        pid = subprocess.Popen([outPuter, oFileName], stdout=subprocess.PIPE)
         assert 2 == d.compile().parse_stream(pid.stdout)
