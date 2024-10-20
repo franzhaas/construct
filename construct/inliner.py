@@ -1,4 +1,3 @@
-import os
 import ast
 import itertools
 import copy
@@ -9,51 +8,43 @@ import collections
 import builtins
 import logging
 import traceback
+from dataclasses import dataclass
 
 _linesep = "\n"
 _counter = itertools.count()
 
-class _NoLambdasNoNestedFunctionsVisitor(ast.NodeVisitor):
+class _isInlineableResearcher(ast.NodeVisitor):
     def __init__(self):
-        self.has_lambda = False
-        self.has_nested_function = False
+        self.lambdas = 0
+        self.returns = 0
+        self.nestedFunctions = 0
 
-    def visit_Lambda(self, node):
-        self.has_lambda = True
+    def generic_visit(self, node):
+        if isinstance(node, ast.Lambda):
+            self.lambdas += 1
+        if isinstance(node, ast.Return):
+            self.returns += 1
+        if isinstance(node, ast.FunctionDef):
+            self.nestedFunctions += 1
+        super().generic_visit(node)
 
-    def visit_FunctionDef(self, node):
-        # Skip the top-level function definition
-        if hasattr(node, 'parent') and isinstance(node.parent, ast.FunctionDef):
-            self.has_nested_function = True
-        self.generic_visit(node)
 
-    def visit_Call(self, node):
-        self.has_lambda = self.has_lambda or any(isinstance(arg, ast.Lambda) for arg in node.args)
+def _isInlineableInfo(code):
+    tree = ast.parse(code)
+    finder = _isInlineableResearcher()
+    finder.visit(tree)
+    return finder
 
-    def visit(self, node):
-        for child in ast.iter_child_nodes(node):
-            child.parent = node
-        super().visit(node)
-
-    def no_nested_lambdas_or_functions(self):
-        return not self.has_lambda and not self.has_nested_function
-
-def _no_nested_lambdas_or_functions(item):
-    info = _NoLambdasNoNestedFunctionsVisitor()
-    info.visit(item)
-    return info.no_nested_lambdas_or_functions()
 
 class _VariablePrefixer(ast.NodeTransformer):
     def __init__(self, prefix, excludes):
         self.prefix = prefix
         self._exclueds = excludes
-        
 
     def visit_Name(self, node):
         if isinstance(node.ctx, (ast.Store, ast.Load, ast.Del)) and node.id not in self._exclueds and not node.id.startswith("BytesIO") and not node.id.startswith("collections") and not node.id.startswith("itertools"):
             node.id = f"{self.prefix}{node.id}"
         return self.generic_visit(node)
-
 
     def visit(self, node):
         for child in ast.iter_child_nodes(node):
@@ -62,8 +53,7 @@ class _VariablePrefixer(ast.NodeTransformer):
 
 
 def _add_prefix_to_variables(function_ast, excludes, prefix):
-    prefixer = _VariablePrefixer(prefix, excludes)
-    new_function_ast = prefixer.visit(function_ast)
+    new_function_ast = _VariablePrefixer(prefix, excludes).visit(function_ast)
     ast.fix_missing_locations(new_function_ast)
     return new_function_ast
 
@@ -74,32 +64,35 @@ def _inline_functionInFunction(ast2workOn, excludes, inlineAble):
         try:
             if (isinstance(item, ast.Assign) or isinstance(item, ast.Expr) or isinstance(item, ast.Return)) and isinstance(item.value, ast.Call) and hasattr(item.value.func, "id") and item.value.func.id in inlineAble:
                 fName = item.value.func.id
-                prefix = f"__inlining_stage_{next(_counter)}_"
-                function2workOn = copy.deepcopy(inlineAble[fName])
-                toInline = _add_prefix_to_variables(function2workOn, excludes,  prefix)
-                if isinstance(item, ast.Assign):
-                    targets  = ast.unparse(item).replace(ast.unparse(item.value), "")
-                elif isinstance(item, ast.Expr):
-                    targets = ""
-                elif isinstance(item, ast.Return):
-                    targets = "return "
+                function2workOn = copy.deepcopy(inlineAble[fName].item)
+                if isinstance(item, ast.Return) or inlineAble[fName].returns == 0 or (inlineAble[fName].returns == 1 and isinstance(function2workOn.body[-1], ast.Return)):
+                    prefix = f"__inlining_stage_{next(_counter)}_"
+                    toInline = _add_prefix_to_variables(function2workOn, excludes,  prefix)
+                    if isinstance(item, ast.Assign):
+                        targets  = ast.unparse(item).replace(ast.unparse(item.value), "")
+                    elif isinstance(item, ast.Expr):
+                        targets = ""
+                    elif isinstance(item, ast.Return):
+                        targets = "return "
+                    else:
+                        raise ValueError(f"Unexpected item {item}")
+                    argNameList = function2workOn.args.args
+                    argsDict = ({f"{prefix}{item.arg}": value for item, value in zip(argNameList, toInline.args.defaults)}|
+                                {f"{prefix}{item.arg}": item.value for item in item.value.keywords}|
+                                {f"{prefix}{item.arg}": value for item, value in zip(toInline.args.args, item.value.args)})
+                    orderedNames = [f"{prefix}{name.arg}" for name in argNameList]
+                    yield f"{cols}({', '.join(orderedNames)}) = ({', '.join(ast.unparse(argsDict[name]) for name in orderedNames)})"
+                    for element in toInline.body[:-1]:
+                        yield from (f"{cols}{line}" for line in ast.unparse(element).split(_linesep)) 
+                    lastEntry = toInline.body[-1]
+                    if isinstance(lastEntry, ast.Return):
+                        yield f"{cols}{targets}{ast.unparse(lastEntry.value)}"
+                    else:
+                        yield from (f"{cols}{item}" for item in ast.unparse(lastEntry).split(_linesep))
+                        if targets:
+                            yield f"{cols}{targets}None"
                 else:
-                    raise ValueError(f"Unexpected item {item}")
-                argNameList = function2workOn.args.args
-                argsDict = ({f"{prefix}{item.arg}": value for item, value in zip(argNameList, toInline.args.defaults)}|
-                            {f"{prefix}{item.arg}": item.value for item in item.value.keywords}|
-                            {f"{prefix}{item.arg}": value for item, value in zip(toInline.args.args, item.value.args)})
-                orderedNames = [f"{prefix}{name.arg}" for name in argNameList]
-                yield f"{cols}({', '.join(orderedNames)}) = ({', '.join(ast.unparse(argsDict[name]) for name in orderedNames)})"
-                for element in toInline.body[:-1]:
-                    yield from (f"{cols}{line}" for line in ast.unparse(element).split(_linesep)) 
-                lastEntry = toInline.body[-1]
-                if isinstance(lastEntry, ast.Return):
-                    yield f"{cols}{targets}{ast.unparse(lastEntry.value)}"
-                else:
-                    yield from (f"{cols}{item}" for item in ast.unparse(lastEntry).split(_linesep))
-                    if targets:
-                        yield f"{cols}{targets}None"
+                    yield f"{cols}{ast.unparse(item)}"
             elif isinstance(item, ast.Try):
                 yield f"{cols}try:"
                 yield from (f"{cols}{item}" for item in _inline_functionInFunction(item.body, excludes, inlineAble))
@@ -125,7 +118,6 @@ def _inline_functionInOtherFunctions(tree, inlineAbles):
                    ("collections."+ item for item in dir(collections)), ("itertools."+ item for item in dir(itertools)), 
                    dir(builtins), itertools.chain.from_iterable([ast.unparse(item) for item in target.targets] for target in tree.body if isinstance(target, ast.Assign)),
                    (item.name for item in tree.body if isinstance(item, ast.FunctionDef)))) ^ set(["this", "list_"])
-
     for item in tree.body:
         if isinstance(item, ast.FunctionDef):
             yield f"{' '*item.col_offset}def {item.name}({ast.unparse(item.args)}):"
@@ -133,34 +125,21 @@ def _inline_functionInOtherFunctions(tree, inlineAbles):
         else:
             yield f"{' '*item.col_offset}{ast.unparse(item)}"
 
-def _is_item_a_inlineable_functiondef(item):
-    if isinstance(item, ast.FunctionDef):
-        if not _no_nested_lambdas_or_functions(item):
-            logging.warning(f"{item.name}: cant be inlined due to nested function/lambda")
-            return False
-        code = ast.unparse(item)
-        if code.count("lambda") > 0:
-            logging.warning(f"{item.name}: cant be inlined due to lambda")
-            return False
-        returnCount = ast.unparse(item).count("return")
-        if returnCount == 0:
-            return True
-        elif returnCount > 1:
-            logging.warning(f"{item.name}: cant be inlined due to multiple uses of the word return")
-            return False
-        elif returnCount == 1 and isinstance(item.body[-1], ast.Return):
-            return True
-        else:
-            logging.warning(f"{item.name}: cant inline as return is not the last statement of the body of the function")
-            return False
-    return False
+
+@dataclass
+class _inlineableInfo:
+    returns: int
+    name: str
+    item: ast.FunctionDef
+
 
 def inlineAllFunctions(source):
     for _ in range(2): # on first pass we inline functions, which have not yet been inlined, second time closes the gap.
         tree = ast.parse(source)
-        inlineAble = list((item.name, item) for item in tree.body if (_is_item_a_inlineable_functiondef(item)))
-        counted = collections.Counter(item[0] for item in inlineAble)
+        inlineAble = ((item.name, item, _isInlineableInfo(item)) for item in tree.body if isinstance(item, ast.FunctionDef))
+        inlineAble = [_inlineableInfo(returns=info.returns, name=name, item=item) for name, item, info in inlineAble if (info.lambdas == 0 and info.nestedFunctions)]
+        counted = collections.Counter(item.name for item in inlineAble)
+        inlineAble = {item.name: item for item in inlineAble if counted[item.name] == 1}
         if inlineAble and max(counted.values())==1 and min(counted.values()) == 1:
-            inlineAble = {name: val for name, val in inlineAble}
             source = ast.unparse(ast.parse(_linesep.join(_inline_functionInOtherFunctions(tree, inlineAble)))) # format code...
     return source
